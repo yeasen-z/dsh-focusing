@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "title": "Focusing",
+    "description": "你的 context / session 管家：跨会话整理工作记录（直接说「整理我这周干了什么，进度如何」即可生成周报、日报或交接文档），按时间检索上下文档案；并保留循环检测——当一轮对话原地打转时注入全局视角纠偏、拦截重复调用或发起独立分析。"
+  },
+  "panel": {
+    "title": "Focusing",
+    "subtitle": "循环信号与纠偏记录",
+    "refresh": "刷新",
+    "empty": "当前会话没有检测到循环。出现重复步骤时信号会显示在这里。",
+    "emptyNoSession": "打开一个会话以查看它的循环信号。",
+    "notRunning": "这个会话没有在运行，检测器只折叠活跃步骤。",
+    "sectionSignals": "循环信号",
+    "sectionEvents": "纠偏记录",
+    "sectionGoal": "原始目标",
+    "loopRisk": "循环风险",
+    "steps": "步数",
+    "repeats": "重复",
+    "turn": "轮",
+    "step": "步",
+    "kind": "类型",
+    "detail": "详情",
+    "time": "时间",
+    "action": "干预",
+    "soft": "软干预：已注入纠偏",
+    "hard": "硬干预：已拦截调用",
+    "subagent": "子智能体：全局诊断",
+    "budget": "预算：步数上限",
+    "drift": "漂移：目标复核",
+    "none": "无",
+    "token": "Tokens"
+  }
+}

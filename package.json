@@ -1,0 +1,31 @@
+{
+  "name": "dsh-focusing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Context & session workbench for DSH: cross-session work digests (weekly/daily/handoff) with follow-up questions, a time-sliced context record archive, and deterministic loop detection with soft/hard/subagent course correction.",
+  "exports": {
+    ".": "./lib/index.mjs",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib/*.mjs",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  }
+}

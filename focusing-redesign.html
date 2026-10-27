@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focusing · Context 工作台 设计原型 v2</title>
+<style>
+/* ============ 设计令牌 ============ */
+:root{
+  color-scheme:light;
+  --bg:#f6f7f9; --paper:#fff; --ink:#20252e; --muted:#848b98;
+  --line:#e9ecf1; --hover:#f5f7fa;
+  --blue:#4969de; --blue-soft:#edf1ff;
+  --green:#3a9174; --green-soft:#ecf6f1;
+  --amber:#af7927; --amber-soft:#fbf5e9;
+  --red:#c16164; --red-soft:#faeeee;
+  --shadow:0 12px 35px #26334d09;
+}
+[data-theme=dark]{
+  color-scheme:dark;
+  --bg:#16191f; --paper:#1d2129; --ink:#e3e7ee; --muted:#8b95a6;
+  --line:#2b303b; --hover:#252b35;
+  --blue:#9aafff; --blue-soft:#2a3453;
+  --green:#82c5ac; --green-soft:#233b34;
+  --amber:#d7b37b; --amber-soft:#3a3227;
+  --red:#df9a9c; --red-soft:#3d2b2c;
+  --shadow:none;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid #8da5f0;outline-offset:2px}
+svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+::placeholder{color:var(--muted)}
+
+/* ============ 布局骨架 ============ */
+.app{height:100dvh;display:grid;grid-template-columns:200px minmax(0,1fr);overflow:hidden}
+.nav{background:var(--paper);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:22px 12px;gap:2px}
+.nav .brand{display:flex;align-items:center;gap:9px;padding:0 10px 6px}
+.nav .brand svg{width:22px;height:22px;color:var(--blue)}
+.nav .brand h1{font-size:17px;font-weight:650;letter-spacing:-.4px;margin:0}
+.nav .brand .ver{font-size:9px;color:var(--muted);border:1px solid var(--line);padding:1px 5px;border-radius:4px;margin-left:auto}
+.nav .sub{font-size:11px;color:var(--muted);padding:0 10px 18px}
+.nav-item{display:flex;align-items:center;gap:10px;border:0;background:none;text-align:left;
+  padding:9px 10px;border-radius:9px;color:var(--muted);font-size:13px}
+.nav-item:hover{background:var(--hover)}
+.nav-item.active{background:var(--blue-soft);color:var(--blue);font-weight:550}
+.nav-item .badge{margin-left:auto;font-size:10px;background:var(--amber-soft);color:var(--amber);padding:1px 7px;border-radius:99px}
+.nav-label{font-size:10px;letter-spacing:1px;color:var(--muted);padding:20px 10px 6px}
+.nav .foot{margin-top:auto;display:flex;flex-direction:column;gap:2px}
+
+.main{overflow:auto}
+.page{max-width:880px;margin:0 auto;padding:36px 40px 80px}
+.eyebrow{font-size:10px;letter-spacing:1.5px;color:var(--muted);margin-bottom:8px}
+h2.page-title{font-size:22px;font-weight:650;letter-spacing:-.4px;margin:0 0 4px}
+.page-sub{color:var(--muted);font-size:13px;margin-bottom:28px}
+
+/* ============ 通用组件 ============ */
+.card{background:var(--paper);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+.btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--paper);
+  border-radius:9px;padding:8px 14px;font-size:13px}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+[data-theme=dark] .btn.primary{color:#141824}
+.btn.primary:hover{opacity:.92}
+.btn:disabled{opacity:.5;cursor:default}
+.text-btn{border:0;background:none;color:var(--blue);font-size:12px;padding:2px 4px}
+.pill{font-size:10px;padding:2px 8px;border-radius:99px;white-space:nowrap}
+.pill.green{background:var(--green-soft);color:var(--green)}
+.pill.amber{background:var(--amber-soft);color:var(--amber)}
+.pill.red{background:var(--red-soft);color:var(--red)}
+.pill.blue{background:var(--blue-soft);color:var(--blue)}
+.pill.gray{background:var(--hover);color:var(--muted)}
+.dot{width:7px;height:7px;border-radius:99px;background:var(--green);display:inline-block}
+.dot.idle{background:var(--line)}
+.dot.error{background:var(--red)}
+.toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);
+  padding:9px 18px;border-radius:10px;font-size:12px;z-index:50}
+
+/* ============ 工作台：指令输入 ============ */
+.hero{padding:40px 0 10px;text-align:center}
+.hero h2{font-size:26px;font-weight:650;letter-spacing:-.5px;margin:0 0 6px}
+.hero p{color:var(--muted);font-size:13px;margin:0 0 26px}
+.ask{max-width:640px;margin:0 auto;background:var(--paper);border:1px solid var(--line);border-radius:16px;
+  box-shadow:var(--shadow);padding:6px;transition:border-color .15s}
+.ask:focus-within{border-color:var(--blue)}
+.ask textarea{width:100%;border:0;background:none;resize:none;outline:none;padding:12px 14px 4px;
+  font-size:14px;min-height:54px}
+.ask-foot{display:flex;align-items:center;justify-content:space-between;padding:4px 8px 6px}
+.ask-scope{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);
+  border:1px solid var(--line);border-radius:8px;padding:4px 9px;background:none}
+.ask-scope:hover{background:var(--hover)}
+.ask-send{display:inline-flex;align-items:center;gap:6px;border:0;background:var(--blue);color:#fff;
+  border-radius:10px;padding:8px 16px;font-size:13px}
+[data-theme=dark] .ask-send{color:#141824}
+.ask-send:disabled{opacity:.4;cursor:default}
+.chips{max-width:640px;margin:14px auto 0;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.chip{border:1px solid var(--line);background:var(--paper);border-radius:99px;padding:6px 14px;
+  font-size:12px;color:var(--muted)}
+.chip:hover{color:var(--ink);border-color:var(--muted)}
+
+/* 工作台：能力卡片 & 最近结果 */
+.section-head{display:flex;align-items:baseline;justify-content:space-between;margin:38px 0 12px}
+.section-head h3{font-size:14px;font-weight:600;margin:0}
+.section-head span{font-size:11px;color:var(--muted)}
+.cap-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.cap{padding:16px;display:flex;flex-direction:column;gap:8px;text-align:left;border-radius:14px;
+  background:var(--paper);border:1px solid var(--line)}
+.cap:hover{background:var(--hover)}
+.cap .cap-icon{width:34px;height:34px;border-radius:9px;display:grid;place-items:center}
+.cap h4{margin:2px 0 0;font-size:13.5px;font-weight:600}
+.cap p{margin:0;font-size:12px;color:var(--muted);line-height:1.55}
+.recent-item{display:flex;align-items:center;gap:12px;padding:13px 16px;border-top:1px solid var(--line);
+  width:100%;border-left:0;border-right:0;border-bottom:0;background:none;text-align:left}
+.recent-item:first-child{border-top:0}
+.recent-item:hover{background:var(--hover)}
+.recent-item .r-title{font-size:13px}
+.recent-item .r-meta{font-size:11px;color:var(--muted)}
+.recent-item time{margin-left:auto;font-size:11px;color:var(--muted);white-space:nowrap}
+
+/* ============ 整理结果页 ============ */
+.result-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}
+.query-echo{display:inline-flex;align-items:center;gap:8px;background:var(--blue-soft);color:var(--blue);
+  border-radius:99px;padding:5px 14px;font-size:12px;margin-bottom:12px}
+.summary{padding:20px 22px;font-size:14px;line-height:1.8}
+.summary b{font-weight:600}
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}
+.stat{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:13px 16px}
+.stat span{font-size:11px;color:var(--muted);display:block;margin-bottom:3px}
+.stat strong{font-size:19px;font-weight:650;letter-spacing:-.4px}
+.stat small{font-size:11px;color:var(--muted);font-weight:400;margin-left:3px}
+
+.proj{padding:16px 20px}
+.proj+.proj{border-top:1px solid var(--line)}
+.proj-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.proj-head h4{margin:0;font-size:13.5px;font-weight:600}
+.proj-head .pct{margin-left:auto;font-size:12px;color:var(--muted)}
+.bar{height:6px;border-radius:99px;background:var(--hover);overflow:hidden;margin-bottom:12px}
+.bar i{display:block;height:100%;border-radius:99px;background:var(--blue)}
+.bar i.done{background:var(--green)}
+.proj ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}
+.proj li{font-size:12.5px;display:flex;gap:8px;align-items:baseline}
+.proj li .mark{font-size:11px;width:34px;flex-shrink:0;text-align:center;border-radius:5px;padding:0 2px}
+.mark.done{background:var(--green-soft);color:var(--green)}
+.mark.doing{background:var(--blue-soft);color:var(--blue)}
+.mark.risk{background:var(--amber-soft);color:var(--amber)}
+
+.day{display:grid;grid-template-columns:76px 1fr;gap:14px;padding:12px 20px;border-top:1px solid var(--line)}
+.day:first-child{border-top:0}
+.day .d-label{font-size:12px;color:var(--muted);padding-top:1px}
+.day .d-label b{display:block;color:var(--ink);font-weight:600;font-size:12.5px}
+.day ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}
+.day li{font-size:12.5px;display:flex;gap:8px;align-items:baseline}
+.day li em{font-style:normal;color:var(--muted);font-size:11.5px}
+.day li .dot{width:5px;height:5px;margin-top:0;flex-shrink:0;position:relative;top:-2px}
+
+.sources{display:flex;flex-wrap:wrap;gap:8px}
+.source-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--paper);
+  border-radius:8px;padding:5px 11px;font-size:11.5px;color:var(--muted)}
+.source-chip:hover{color:var(--ink)}
+.result-actions{display:flex;gap:10px;margin:22px 0 10px}
+
+.followup{margin-top:26px}
+.fu-block{padding:14px 18px;margin-top:10px}
+.fu-q{font-size:12px;color:var(--blue);margin-bottom:6px}
+.fu-a{font-size:13px;line-height:1.7}
+
+/* 生成中骨架 */
+.thinking{padding:30px 24px;display:flex;flex-direction:column;gap:14px}
+.think-line{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--muted)}
+.think-line.done{color:var(--ink)}
+.think-line .spin{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--blue);
+  border-radius:99px;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.think-line svg{width:14px;height:14px;color:var(--green)}
+
+/* ============ 上下文记录页 ============ */
+.filter-row{display:flex;gap:8px;margin-bottom:14px;align-items:center}
+.search{flex:1;display:flex;align-items:center;gap:8px;background:var(--paper);border:1px solid var(--line);
+  border-radius:9px;padding:8px 12px;color:var(--muted)}
+.search svg{width:15px}
+.search input{width:100%;background:none;border:0;outline:none;font-size:12.5px}
+.filter{border:1px solid var(--line);background:var(--paper);border-radius:9px;padding:8px 13px;
+  font-size:12px;color:var(--muted)}
+.filter.on{background:var(--blue-soft);color:var(--blue);border-color:transparent}
+.rec{display:grid;grid-template-columns:1fr auto;gap:4px 16px;padding:14px 18px;border-top:1px solid var(--line);
+  width:100%;border-left:0;border-right:0;border-bottom:0;background:none;text-align:left}
+.rec:first-child{border-top:0}
+.rec:hover{background:var(--hover)}
+.rec .r-line1{display:flex;align-items:center;gap:9px;font-size:13.5px}
+.rec .r-line2{font-size:12px;color:var(--muted);grid-column:1}
+.rec .r-right{grid-row:1/3;display:flex;flex-direction:column;align-items:flex-end;gap:5px;
+  font-size:11px;color:var(--muted)}
+.rec .tags{display:flex;gap:5px}
+
+/* ============ 专注模块页 ============ */
+.focus-row{display:grid;grid-template-columns:1fr auto;gap:4px 16px;padding:15px 18px;border-top:1px solid var(--line)}
+.focus-row:first-child{border-top:0}
+.notice{display:flex;gap:13px;padding:16px 18px;border-radius:12px;margin-bottom:14px}
+.notice.warn{background:var(--amber-soft)}
+.notice.calm{background:var(--green-soft)}
+.notice .n-icon{color:var(--amber)}
+.notice.calm .n-icon{color:var(--green)}
+.notice h4{margin:0 0 3px;font-size:13px}
+.notice p{margin:0;font-size:12.5px;color:var(--muted)}
+
+@media(max-width:760px){
+  .app{grid-template-columns:1fr}
+  .nav{display:none}
+  .cap-grid,.stat-row{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true"><defs>
+<symbol id="focus" viewBox="0 0 24 24"><path d="M8 3H4v4m12-4h4v4M4 17v4h4m12-4v4h-4"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></symbol>
+<symbol id="home" viewBox="0 0 24 24"><path d="m4 11 8-7 8 7v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1Z"/></symbol>
+<symbol id="layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 13 9 5 9-5"/><path d="m3 17.5 9 5 9-5" opacity=".4"/></symbol>
+<symbol id="doc" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6Z"/><path d="M14 3v4h4M9 12h6M9 16h6"/></symbol>
+<symbol id="pulse" viewBox="0 0 24 24"><path d="M3 12h4l2.5-7 5 14L17 12h4"/></symbol>
+<symbol id="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1 1m12 12 1 1M5 19l1-1M18 6l1-1"/></symbol>
+<symbol id="gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M4.9 4.9l2.1 2.1m10 10 2.1 2.1M2 12h3m14 0h3M4.9 19.1l2.1-2.1m10-10 2.1-2.1"/></symbol>
+<symbol id="search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></symbol>
+<symbol id="send" viewBox="0 0 24 24"><path d="M5 12 20 5l-4 14-4-6Zm7 1 8-8"/></symbol>
+<symbol id="check" viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"/></symbol>
+<symbol id="arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+<symbol id="back" viewBox="0 0 24 24"><path d="M19 12H5m5 5-5-5 5-5"/></symbol>
+<symbol id="copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></symbol>
+<symbol id="diamond" viewBox="0 0 24 24"><path d="m12 3 9 9-9 9-9-9Z"/><path d="M12 8v5m0 3h.01"/></symbol>
+<symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+<symbol id="spark" viewBox="0 0 24 24"><path d="M12 3v4m0 10v4M3 12h4m10 0h4M6 6l2 2m8 8 2 2M6 18l2-2m8-8 2-2"/><circle cx="12" cy="12" r="2"/></symbol>
+<symbol id="folder" viewBox="0 0 24 24"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></symbol>
+</defs></svg>
+
+<div class="app">
+<nav class="nav" aria-label="主导航">
+  <div class="brand"><svg><use href="#focus"/></svg><h1>Focusing</h1><span class="ver">v2 原型</span></div>
+  <div class="sub">你的 context · session 管家</div>
+  <button class="nav-item" data-view="home"><svg><use href="#home"/></svg>工作台</button>
+  <div class="nav-label">能力</div>
+  <button class="nav-item" data-view="records"><svg><use href="#layers"/></svg>上下文记录</button>
+  <button class="nav-item" data-view="digests"><svg><use href="#doc"/></svg>整理与报告</button>
+  <button class="nav-item" data-view="focus"><svg><use href="#pulse"/></svg>专注纠偏<span class="badge" id="focus-badge" hidden>1</span></button>
+  <div class="foot">
+    <button class="nav-item" onclick="toast('设置页在正式版实现（分析来源 / 模型 / 提示词）')"><svg><use href="#gear"/></svg>设置</button>
+    <button class="nav-item" id="theme-toggle"><svg><use href="#sun"/></svg>明暗主题</button>
+  </div>
+</nav>
+<main class="main"><div class="page" id="page"></div></main>
+</div>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script>
+/* ================= 工具 ================= */
+const $=(s,el=document)=>el.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const icon=n=>`<svg aria-hidden="true"><use href="#${n}"/></svg>`;
+let toastTimer;
+function toast(t){const n=$('#toast');n.textContent=t;n.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>n.hidden=true,2800)}
+
+/* ================= 示例数据 ================= */
+const SESSIONS=[
+ {id:'auth',    title:'重构登录鉴权模块',   project:'web-console',  time:'刚刚',    running:true,  steps:18, calls:26, tags:['进行中','有线索'], gist:'拆分鉴权逻辑，补边界测试；最近一次测试仍有 1 个失败。'},
+ {id:'panel',   title:'优化 Focusing 面板交互', project:'dsh-focusing', time:'2 分钟前', running:true,  steps:9,  calls:14, tags:['进行中'],        gist:'重新设计页面布局，区分观察线索与诊断结论。'},
+ {id:'nav',     title:'修复移动端导航溢出', project:'web-console',  time:'今天 09:20', running:false, steps:12, calls:17, tags:['已完成'],        gist:'375px 宽度下导航溢出已修复，布局测试通过。'},
+ {id:'tests',   title:'编写 detector 单测', project:'dsh-focusing', time:'周四',     running:false, steps:21, calls:33, tags:['已完成'],        gist:'15 个单测覆盖指纹、阈值、误报与跨轮清理。'},
+ {id:'prestep', title:'调研 pre-step 注入机制', project:'dsh-focusing', time:'周二',  running:false, steps:34, calls:51, tags:['已完成'],        gist:'确认纠偏以 source.kind=focusing 的 user message 注入。'},
+ {id:'replay',  title:'回放真实会话验证检测器', project:'dsh-focusing', time:'周三',  running:false, steps:16, calls:22, tags:['已完成'],        gist:'86 步会话回放，首次触发落在第 72 步，符合设计意图。'},
+ {id:'settings',title:'实现分析设置面板',   project:'dsh-focusing', time:'周五',     running:false, steps:27, calls:40, tags:['已完成'],        gist:'支持 DSH 模型 / 外部接口切换，测试连接与内容预览。'},
+];
+
+/* 预置指令 → 预置结果（原型里全部为示例数据） */
+const PRESETS=[
+ {key:'week',  chip:'整理我这周干了什么，进度如何',      kind:'整理'},
+ {key:'today', chip:'总结今天各会话的进展',              kind:'整理'},
+ {key:'stuck', chip:'找出最近反复失败的调用',            kind:'分析'},
+ {key:'handoff',chip:'把鉴权重构的上下文整理成交接文档', kind:'整理'},
+];
+
+const RECENT=[
+ {key:'week',  title:'本周工作整理（10.20 – 10.26）', kind:'周报', time:'昨天 23:00'},
+ {key:'stuck', title:'重复失败调用分析',               kind:'分析', time:'周五 18:12'},
+];
+
+/* ================= 状态 ================= */
+let view='home';            // home | records | digests | focus | result
+let resultKey=null;         // 当前展示的结果
+let generating=false;
+let followups=[];           // [{q,a}]
+let recFilter='all', recQuery='';
+
+/* ================= 导航 ================= */
+document.querySelectorAll('.nav-item[data-view]').forEach(n=>n.onclick=()=>{
+  if(generating){toast('正在生成，请稍候');return}
+  view=n.dataset.view;resultKey=null;followups=[];render();
+});
+$('#theme-toggle').onclick=()=>{
+  document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
+};
+
+/* ================= 视图：工作台 ================= */
+function renderHome(){
+  return `
+  <div class="hero">
+    <h2>想了解你的工作上下文什么？</h2>
+    <p>Focusing 汇集所有会话的上下文，直接提出要求，由它整理与分析。</p>
+    <div class="ask">
+      <textarea id="ask-input" rows="2" placeholder="例如：整理我这周干了什么，进度如何"></textarea>
+      <div class="ask-foot">
+        <button class="ask-scope" onclick="toast('正式版可选择范围：全部会话 / 某项目 / 某时间段')">${icon('folder')}范围：全部会话 · 最近 7 天</button>
+        <button class="ask-send" id="ask-send">${icon('send')}开始整理</button>
+      </div>
+    </div>
+    <div class="chips">
+      ${PRESETS.map(p=>`<button class="chip" data-preset="${p.key}">${p.chip}</button>`).join('')}
+    </div>
+  </div>
+
+  <div class="section-head"><h3>能力模块</h3><span>指令会自动路由到对应能力</span></div>
+  <div class="cap-grid">
+    <button class="cap" data-goto="digests">
+      <span class="cap-icon" style="background:var(--blue-soft);color:var(--blue)">${icon('doc')}</span>
+      <h4>上下文记录整理</h4>
+      <p>把散落在多个会话里的工作，整理成周报、日报或交接文档。</p>
+    </button>
+    <button class="cap" data-goto="records">
+      <span class="cap-icon" style="background:var(--green-soft);color:var(--green)">${icon('layers')}</span>
+      <h4>上下文记录</h4>
+      <p>全部会话的上下文档案：目标、关键改动、产出，可检索。</p>
+    </button>
+    <button class="cap" data-goto="focus">
+      <span class="cap-icon" style="background:var(--amber-soft);color:var(--amber)">${icon('pulse')}</span>
+      <h4>专注纠偏</h4>
+      <p>检测运行中的会话是否原地打转，必要时注入全局视角纠偏。</p>
+    </button>
+  </div>
+
+  <div class="section-head"><h3>最近的整理结果</h3><button class="text-btn" data-goto="digests">查看全部 →</button></div>
+  <div class="card">
+    ${RECENT.map(r=>`<button class="recent-item" data-result="${r.key}">
+      <span class="pill blue">${r.kind}</span>
+      <span><span class="r-title">${r.title}</span></span>
+      <time>${r.time}</time>${icon('arrow')}
+    </button>`).join('')}
+  </div>`;
+}
+
+/* ================= 视图：生成中 ================= */
+const THINK_STEPS=[
+ '扫描最近 7 天的会话记录（7 个会话 · 203 个工具调用）',
+ '提取每个会话的目标、关键改动与结论',
+ '按项目与时间聚合，计算进度',
+ '生成整理结果',
+];
+function renderThinking(doneCount){
+  return `
+  <div class="query-echo">${icon('spark')}${esc(currentQuery())}</div>
+  <div class="card thinking" aria-live="polite">
+    ${THINK_STEPS.map((s,i)=>`<div class="think-line ${i<doneCount?'done':''}">
+      ${i<doneCount?icon('check'):i===doneCount?'<span class="spin"></span>':'<span style="width:14px"></span>'}
+      ${s}</div>`).join('')}
+  </div>`;
+}
+function currentQuery(){
+  const p=PRESETS.find(p=>p.key===resultKey);
+  return p?p.chip:customQuery||'整理我这周干了什么，进度如何';
+}
+let customQuery='';
+
+/* ================= 视图：整理结果 ================= */
+function weekResult(){
+  return `
+  <div class="summary card">
+    本周的主线是 <b>dsh-focusing 插件</b> 从想法推进到可运行：完成了检测器、纠偏注入和回放验证，
+    并在真实会话中触发过一次纠偏；面板的浏览器端验证仍未完成。另一条线是 <b>web-console</b>：
+    移动端导航溢出已修复并验证，<b>登录鉴权重构仍在进行</b>，当前有 1 个测试失败待解决。
+    整体节奏正常，没有发现长期停滞的任务。
+  </div>
+  <div class="stat-row">
+    <div class="stat"><span>涉及会话</span><strong>7<small>个</small></strong></div>
+    <div class="stat"><span>工具调用</span><strong>203<small>次</small></strong></div>
+    <div class="stat"><span>已完成任务</span><strong>5<small>项</small></strong></div>
+    <div class="stat"><span>进行中</span><strong>2<small>项</small></strong></div>
+  </div>
+
+  <div class="section-head"><h3>按项目的进度</h3><span>进度为示例估算，正式版由分析模型给出依据</span></div>
+  <div class="card">
+    <div class="proj">
+      <div class="proj-head"><span class="dot"></span><h4>dsh-focusing · 循环检测插件</h4><span class="pct">约 75%</span></div>
+      <div class="bar"><i style="width:75%"></i></div>
+      <ul>
+        <li><span class="mark done">完成</span>检测器纯函数 + 15 个单测（指纹、阈值、误报、跨轮清理）</li>
+        <li><span class="mark done">完成</span>pre-step 纠偏注入上线，并在真实运行中触发过一次</li>
+        <li><span class="mark done">完成</span>86 步真实会话回放验证，首次触发第 72 步符合预期</li>
+        <li><span class="mark done">完成</span>分析设置面板（模型来源、提示词、发送内容开关）</li>
+        <li><span class="mark doing">进行</span>Web 面板的浏览器端视觉与交互验证</li>
+        <li><span class="mark risk">风险</span>turnStartedAt 取值不准；重载后 pending 工具名丢失</li>
+      </ul>
+    </div>
+    <div class="proj">
+      <div class="proj-head"><span class="dot"></span><h4>web-console</h4><span class="pct">1 完成 · 1 进行</span></div>
+      <div class="bar"><i class="done" style="width:55%"></i></div>
+      <ul>
+        <li><span class="mark done">完成</span>移动端导航溢出修复（375px 验证通过，桌面端不受影响）</li>
+        <li><span class="mark doing">进行</span>登录鉴权重构 —— auth.spec.ts 仍有 1 个失败（期望 401 实际 500）</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="section-head"><h3>按天回顾</h3><span>10 月 20 日 – 10 月 26 日</span></div>
+  <div class="card">
+    ${[['周一','10.20',[['梳理 Focusing 插件需求，确定「检测器独立于对话」的方向','dsh-focusing']]],
+       ['周二','10.21',[['调研 pre-step 注入机制，确定以独立 source 注入纠偏','dsh-focusing']]],
+       ['周三','10.22',[['用真实会话日志回放检测器，验证触发点','dsh-focusing']]],
+       ['周四','10.23',[['编写 15 个检测器单测并全部通过','dsh-focusing']]],
+       ['周五','10.24',[['实现分析设置面板与外部接口支持','dsh-focusing'],['开始登录鉴权模块重构','web-console']]],
+       ['周六','10.25',[['修复移动端导航溢出并验证','web-console']]],
+       ['周日','10.26',[['继续鉴权重构：拆分 verify 逻辑，测试仍有 1 个失败','web-console'],['重新设计 Focusing 面板交互','dsh-focusing']]],
+      ].map(([d,date,items])=>`
+      <div class="day"><div class="d-label"><b>${d}</b>${date}</div>
+      <ul>${items.map(([t,p])=>`<li><span class="dot" style="background:var(--blue)"></span>${t}<em>· ${p}</em></li>`).join('')}</ul></div>`).join('')}
+  </div>
+
+  <div class="section-head"><h3>数据来源</h3><span>点击可跳回原会话（原型内仅提示）</span></div>
+  <div class="sources">
+    ${SESSIONS.map(s=>`<button class="source-chip" onclick="toast('正式版将打开会话：${esc(s.title)}')">${icon('layers')}${s.title}</button>`).join('')}
+  </div>`;
+}
+
+function todayResult(){
+  return `
+  <div class="summary card">
+    今天有 <b>3 个会话</b> 活跃。<b>移动端导航溢出</b> 已完成并通过验证；
+    <b>登录鉴权重构</b> 推进到异常处理环节，但最近两次测试返回了相同错误，值得关注；
+    <b>Focusing 面板交互优化</b> 刚开始，处于布局调整阶段。
+  </div>
+  <div class="card">
+    <div class="proj"><div class="proj-head"><span class="dot idle"></span><h4>修复移动端导航溢出</h4><span class="pill green">已完成</span></div>
+      <ul><li><span class="mark done">完成</span>弹性布局调整 + 布局测试通过，09:20 结束</li></ul></div>
+    <div class="proj"><div class="proj-head"><span class="dot"></span><h4>重构登录鉴权模块</h4><span class="pill amber">1 条线索</span></div>
+      <ul><li><span class="mark doing">进行</span>拆分 verify 逻辑、调整异常处理</li>
+          <li><span class="mark risk">线索</span>auth.spec.ts 相同错误连续出现 2 次（jwt expired → 500）</li></ul></div>
+    <div class="proj"><div class="proj-head"><span class="dot"></span><h4>优化 Focusing 面板交互</h4><span class="pill blue">进行中</span></div>
+      <ul><li><span class="mark doing">进行</span>读取组件、检查主题变量、调整布局（9 步 / 14 次调用）</li></ul></div>
+  </div>`;
+}
+
+function stuckResult(){
+  return `
+  <div class="summary card">
+    最近 7 天里，只有 <b>1 组重复失败</b>：会话「重构登录鉴权模块」中
+    <code>pnpm test -- auth.spec.ts</code> 两次返回完全相同的错误原文。
+    两次失败之间发生过异常处理的代码修改，<b>暂不足以认定为循环</b>，建议先核对异常传播路径。
+  </div>
+  <div class="card">
+    <div class="proj">
+      <div class="proj-head"><span class="dot error"></span><h4>pnpm test -- auth.spec.ts</h4><span class="pill red">失败 ×2</span></div>
+      <ul>
+        <li><span class="mark risk">09:44</span>第一次失败：Expected 401 / Received 500 · TokenExpiredError</li>
+        <li><span class="mark doing">09:46</span>中间修改：src/auth/verify.ts 调整异常处理</li>
+        <li><span class="mark risk">09:47</span>第二次失败：错误原文与第一次完全相同</li>
+      </ul>
+      <div style="margin-top:12px;display:flex;gap:10px">
+        <button class="btn" onclick="toast('正式版将跳到专注纠偏模块查看该线索')">在专注纠偏中查看${icon('arrow')}</button>
+        <button class="btn" onclick="toast('正式版将发起独立诊断')">发起独立诊断</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function handoffResult(){
+  return `
+  <div class="summary card">
+    已把「重构登录鉴权模块」的上下文整理成交接文档：包含任务目标、当前状态、
+    关键文件、未解决问题与建议的下一步。可直接复制给接手的人（或另一个 agent 会话）。
+  </div>
+  <div class="card" style="padding:20px 22px;font-size:13px">
+    <h4 style="margin:0 0 10px">交接：登录鉴权模块重构</h4>
+    <p style="margin:0 0 8px"><b>目标</b>　保持现有接口不变，拆分鉴权逻辑，补充边界测试，确保现有测试通过。</p>
+    <p style="margin:0 0 8px"><b>当前状态</b>　verify 逻辑已拆分；auth.spec.ts 有 1 个失败（期望 401 实际 500，TokenExpiredError 未被入口捕获）。</p>
+    <p style="margin:0 0 8px"><b>关键文件</b>　src/auth/verify.ts（本周改动 3 次）· src/auth/auth.spec.ts:84–112（失败位置）</p>
+    <p style="margin:0 0 8px"><b>未解决</b>　过期令牌异常的传播路径未确认；两次测试返回相同错误。</p>
+    <p style="margin:0"><b>建议下一步</b>　先核对异常是否在请求处理入口被捕获，再决定是否调整重构方案。</p>
+  </div>`;
+}
+
+const RESULTS={
+ week:  {title:'本周工作整理',   sub:'10 月 20 日 – 10 月 26 日 · 基于 7 个会话', body:weekResult},
+ today: {title:'今日进展总结',   sub:'10 月 27 日 · 基于 3 个活跃会话',           body:todayResult},
+ stuck: {title:'重复失败调用分析',sub:'最近 7 天 · 基于确定性信号',               body:stuckResult},
+ handoff:{title:'交接文档：鉴权重构',sub:'基于会话「重构登录鉴权模块」',          body:handoffResult},
+};
+
+function renderResult(){
+  const r=RESULTS[resultKey];
+  return `
+  <button class="text-btn" id="back-home" style="margin-bottom:14px;display:inline-flex;align-items:center;gap:5px">${icon('back')}返回工作台</button>
+  <div class="query-echo">${icon('spark')}${esc(currentQuery())}</div>
+  <div class="result-head">
+    <div><h2 class="page-title">${r.title}</h2><div class="page-sub" style="margin:0">${r.sub} · 示例数据</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" onclick="toast('已复制为 Markdown（示例）')">${icon('copy')}复制 Markdown</button>
+      <button class="btn" onclick="toast('正式版支持导出 / 固定为周报')">导出</button>
+    </div>
+  </div>
+  ${r.body()}
+  <div class="followup">
+    <div class="section-head"><h3>基于这份结果追问</h3><span>追问只引用已整理的上下文，不重新扫描</span></div>
+    ${followups.map(f=>`<div class="card fu-block"><div class="fu-q">你：${esc(f.q)}</div><div class="fu-a">${f.a}</div></div>`).join('')}
+    <div class="ask" style="max-width:none;margin-top:10px">
+      <textarea id="fu-input" rows="1" placeholder="例如：鉴权重构还差什么才能收尾？"></textarea>
+      <div class="ask-foot"><span style="font-size:11px;color:var(--muted);padding-left:8px">示例追问 · 回答为预置内容</span>
+      <button class="ask-send" id="fu-send">${icon('send')}追问</button></div>
+    </div>
+  </div>`;
+}
+
+const FU_ANSWERS=[
+ [/鉴权|auth|收尾|还差/,'还差两件事：① 确认 TokenExpiredError 在请求入口被转换成 401（当前漏到了 500）；② 异常路径补 1 个边界测试。其余拆分工作本周已完成，预计半天内可收尾。'],
+ [/focusing|面板|插件/,'dsh-focusing 剩余工作：浏览器端验证面板渲染、修复 turnStartedAt 取值、以及 reload 后用会话日志回填 pending。前者是发布前必须项，后两者是已知缺陷可排后。'],
+ [/下周|计划|接下来/,'建议下周优先级：① 收尾鉴权重构（半天）→ ② Focusing 面板浏览器验证（1 天）→ ③ 修复两个已知缺陷。移动端导航已完成无需跟进。'],
+];
+function answerFor(q){
+  for(const [re,a] of FU_ANSWERS) if(re.test(q)) return a;
+  return '（示例回答）这是原型的预置追问演示。正式版中，追问会把当前整理结果作为上下文发给分析模型，回答将引用具体会话与调用记录。';
+}
+
+/* ================= 视图：上下文记录 ================= */
+function renderRecords(){
+  const list=SESSIONS.filter(s=>{
+    if(recFilter==='running'&&!s.running)return false;
+    if(recFilter==='done'&&s.running)return false;
+    return (s.title+s.project+s.gist).toLowerCase().includes(recQuery.toLowerCase());
+  });
+  return `
+  <div class="eyebrow">CONTEXT RECORDS</div>
+  <h2 class="page-title">上下文记录</h2>
+  <div class="page-sub">每个会话沉淀为一份可检索的上下文档案：目标、关键改动、结论。</div>
+  <div class="filter-row">
+    <label class="search">${icon('search')}<input id="rec-search" placeholder="搜索标题、项目或内容摘要" value="${esc(recQuery)}"></label>
+    ${[['all','全部'],['running','进行中'],['done','已完成']].map(([k,t])=>
+      `<button class="filter ${recFilter===k?'on':''}" data-filter="${k}">${t}</button>`).join('')}
+  </div>
+  <div class="card">
+    ${list.length?list.map(s=>`
+    <button class="rec" onclick="toast('正式版将打开该会话的完整上下文档案')">
+      <span class="r-line1"><i class="dot ${s.running?'':'idle'}"></i>${s.title}
+        ${s.tags.includes('有线索')?'<span class="pill amber">有线索</span>':''}</span>
+      <span class="r-line2">${s.gist}</span>
+      <span class="r-right"><span class="tags"><span class="pill gray">${s.project}</span></span>
+        <span>${s.time} · ${s.steps} 步 / ${s.calls} 次调用</span></span>
+    </button>`).join(''):'<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">没有匹配的记录</div>'}
+  </div>`;
+}
+
+/* ================= 视图：整理与报告 ================= */
+function renderDigests(){
+  return `
+  <div class="eyebrow">DIGESTS & REPORTS</div>
+  <h2 class="page-title">整理与报告</h2>
+  <div class="page-sub">由指令生成的整理结果都会保存在这里；也可以设置定时自动整理。</div>
+  <div class="card" style="margin-bottom:14px">
+    ${[...RECENT,{key:'handoff',title:'交接文档：鉴权重构',kind:'交接',time:'周五 17:40'}].map(r=>`
+    <button class="recent-item" data-result="${r.key}">
+      <span class="pill blue">${r.kind}</span>
+      <span><span class="r-title">${r.title}</span></span>
+      <time>${r.time}</time>${icon('arrow')}
+    </button>`).join('')}
+  </div>
+  <div class="card" style="padding:16px 20px;display:flex;align-items:center;gap:14px">
+    <span class="cap-icon" style="background:var(--blue-soft);color:var(--blue);width:34px;height:34px;border-radius:9px;display:grid;place-items:center">${icon('clock')}</span>
+    <div style="flex:1"><b style="font-size:13px">定时整理</b>
+      <div style="font-size:12px;color:var(--muted)">例如：每周日 23:00 自动生成本周工作整理。</div></div>
+    <button class="btn" onclick="toast('定时整理在正式版实现（可接 DSH 的 schedule 能力）')">去设置</button>
+  </div>`;
+}
+
+/* ================= 视图：专注纠偏 ================= */
+function renderFocus(){
+  return `
+  <div class="eyebrow">FOCUS GUARD</div>
+  <h2 class="page-title">专注纠偏</h2>
+  <div class="page-sub">对运行中的会话做确定性循环检测；规则提供线索，独立诊断给出判断。仅观察，不自动干预。</div>
+  <div class="notice warn">
+    <span class="n-icon">${icon('diamond')}</span>
+    <div><h4>「重构登录鉴权模块」有一条待确认线索</h4>
+      <p>同一测试错误连续出现 2 次（same-failing-result · 强度 0.9）。规则命中 ≠ 已确认卡住。</p>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button class="btn primary" onclick="toast('示例：发起独立诊断（干净上下文的子 agent）')">发起独立诊断</button>
+        <button class="btn" onclick="toast('示例：查看证据（命令与两次错误原文）')">查看证据</button>
+      </div></div>
+  </div>
+  <div class="notice calm">
+    <span class="n-icon">${icon('check')}</span>
+    <div><h4>其余 1 个运行中的会话未发现异常</h4>
+      <p>「优化 Focusing 面板交互」最近活动围绕目标展开，未出现重复行为。</p></div>
+  </div>
+  <div class="section-head"><h3>检测配置</h3><span>与现有插件配置一致，默认全部关闭</span></div>
+  <div class="card">
+    ${[['软干预','pre-step 注入一条全局视角纠偏 message','关闭'],
+       ['硬干预','pre-execute 拒绝反复重复的调用','关闭'],
+       ['子代理诊断','干净上下文的子 agent 只看事实做全局诊断','关闭'],
+      ].map(([t,d,s])=>`<div class="focus-row"><div><b style="font-size:13px">${t}</b>
+        <div style="font-size:12px;color:var(--muted)">${d}</div></div>
+        <span class="pill gray" style="align-self:center">${s}</span></div>`).join('')}
+  </div>`;
+}
+
+/* ================= 渲染与事件 ================= */
+function render(){
+  document.querySelectorAll('.nav-item[data-view]').forEach(n=>{
+    n.classList.toggle('active',n.dataset.view===view||(view==='result'&&n.dataset.view==='digests'&&resultKey!==null&&!generating));
+  });
+  $('#focus-badge').hidden=false;
+  const page=$('#page');
+  if(view==='home')page.innerHTML=renderHome();
+  else if(view==='records')page.innerHTML=renderRecords();
+  else if(view==='digests')page.innerHTML=renderDigests();
+  else if(view==='focus')page.innerHTML=renderFocus();
+  else if(view==='result')page.innerHTML=generating?renderThinking(thinkDone):renderResult();
+  bind();
+}
+
+let thinkDone=0;
+function startGenerate(key,query){
+  resultKey=key;customQuery=query||'';followups=[];view='result';generating=true;thinkDone=0;render();
+  const tick=()=>{thinkDone++;if(thinkDone<THINK_STEPS.length){render();setTimeout(tick,650)}
+    else{generating=false;render();toast('整理完成 · 示例数据');window.scrollTo(0,0)}};
+  setTimeout(tick,650);
+}
+
+function bind(){
+  document.querySelectorAll('[data-goto]').forEach(n=>n.onclick=()=>{view=n.dataset.goto;render()});
+  document.querySelectorAll('[data-result]').forEach(n=>n.onclick=()=>startGenerate(n.dataset.result));
+  document.querySelectorAll('[data-preset]').forEach(n=>n.onclick=()=>startGenerate(n.dataset.preset));
+  const back=$('#back-home');if(back)back.onclick=()=>{view='home';resultKey=null;followups=[];render()};
+
+  const send=$('#ask-send'),input=$('#ask-input');
+  if(send&&input){
+    const go=()=>{const q=input.value.trim();
+      if(!q){toast('先输入想整理或分析的内容');return}
+      // 简单意图路由示例：匹配预置指令则出对应结果，否则默认出周报
+      const hit=PRESETS.find(p=>q.includes('周')&&p.key==='week')||
+                PRESETS.find(p=>/今天|今日/.test(q)&&p.key==='today')||
+                PRESETS.find(p=>/失败|卡住|循环/.test(q)&&p.key==='stuck')||
+                PRESETS.find(p=>/交接|文档/.test(q)&&p.key==='handoff');
+      startGenerate(hit?hit.key:'week',q)};
+    send.onclick=go;
+    input.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();go()}};
+    input.focus();
+  }
+
+  const fuSend=$('#fu-send'),fuInput=$('#fu-input');
+  if(fuSend&&fuInput){
+    const go=()=>{const q=fuInput.value.trim();if(!q){toast('输入追问内容');return}
+      followups.push({q,a:answerFor(q)});render();
+      // 渲染后滚动到底部的追问区
+      requestAnimationFrame(()=>{const blocks=document.querySelectorAll('.fu-block');
+        if(blocks.length)blocks[blocks.length-1].scrollIntoView({behavior:'smooth',block:'center'})});};
+    fuSend.onclick=go;
+    fuInput.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();go()}};
+  }
+
+  const rs=$('#rec-search');
+  if(rs){rs.oninput=()=>{recQuery=rs.value;render();const n=$('#rec-search');n.focus();n.setSelectionRange(n.value.length,n.value.length)}}
+  document.querySelectorAll('[data-filter]').forEach(n=>n.onclick=()=>{recFilter=n.dataset.filter;render()});
+}
+
+render();
+</script>
+</body>
+</html>

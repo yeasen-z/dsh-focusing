@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "title": "Focusing",
+    "description": "Your context and session keeper: organize work across sessions (ask \"summarize what I did this week and how far along it is\" to get a weekly, daily or handoff digest), browse a time-sliced archive of every session, and keep loop detection that injects a whole-picture correction when a turn starts repeating itself."
+  },
+  "panel": {
+    "title": "Focusing",
+    "subtitle": "Loop signals and course corrections",
+    "refresh": "Refresh",
+    "empty": "No loop detected in the current session. Signals appear here as steps repeat.",
+    "emptyNoSession": "Open a session to watch its loop signals.",
+    "notRunning": "This session is not running. The detector only folds live steps.",
+    "sectionSignals": "Loop signals",
+    "sectionEvents": "Course corrections",
+    "sectionGoal": "Original goal",
+    "loopRisk": "Loop risk",
+    "steps": "Steps",
+    "repeats": "Repeats",
+    "turn": "Turn",
+    "step": "Step",
+    "kind": "Kind",
+    "detail": "Detail",
+    "time": "Time",
+    "action": "Action",
+    "soft": "Soft: injected correction",
+    "hard": "Hard: blocked call",
+    "subagent": "Subagent: global diagnosis",
+    "budget": "Budget: step ceiling",
+    "drift": "Drift: goal check",
+    "none": "None",
+    "token": "Tokens"
+  }
+}

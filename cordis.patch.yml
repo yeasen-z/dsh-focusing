@@ -1,0 +1,35 @@
+# dsh-focusing: one plugin row. Everything tunable lives in its `config`.
+#
+# The plugin is passive until a turn actually repeats itself. All three
+# intervention strengths are opt-in per profile through this block:
+#   soft       -> inject a course-correction context before the next step
+#   hard       -> deny the repeating tool call once
+#   subagent   -> ask a clean-context child for a global diagnosis
+#
+# `budget.maxStepsPerTurn` is a safety net, never a trigger on its own: a long
+# honest session is not a loop. It only reinforces an already-detected repeat.
+#
+# `soft.enabled` is false by default so that installing this bundle changes
+# nothing until you decide it should. Turn it on to start correcting.
+- insert:
+    - id: dsh-focusing
+      name: dsh-focusing
+      config:
+        soft:
+          enabled: false
+          threshold: 3
+          cooldownSteps: 4
+          maxPerTurn: 3
+        hard:
+          enabled: false
+          threshold: 4
+          tools: []
+        budget:
+          enabled: true
+          maxStepsPerTurn: 120
+        subagent:
+          enabled: false
+        goalDrift:
+          enabled: true
+          checkEverySteps: 12
+        windowSteps: 14
