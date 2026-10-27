@@ -10,6 +10,13 @@ const dir = realpathSync(mkdtempSync(join(tmpdir(), "focusing-ctx-test-")));
 after(() => { if (dir.startsWith(realpathSync(tmpdir()))) rmSync(dir, { recursive: true, force: true }); });
 
 const now = Date.now();
+// The digest tests ask for "today" in Beijing time (offset 480). A fixture that
+// is simply "an hour ago" falls on yesterday whenever the suite runs between
+// 00:00 and 01:00 there, which silently empties the range and skips the model.
+// Pin it inside today's local range and always in the past.
+const BEIJING_OFFSET_MS = 480 * 60e3;
+const startOfToday = Math.floor((now + BEIJING_OFFSET_MS) / 864e5) * 864e5 - BEIJING_OFFSET_MS;
+const recentAt = Math.max(startOfToday + 1000, Math.min(startOfToday + 12 * 3600e3, now - 60e3));
 const ev = (type, time, data) => ({ type, time, data });
 const log = (title, at) => [
   ev("user/message", at, { source: { kind: "user" }, content: [{ type: "text", text: `do ${title}` }] }),
@@ -23,7 +30,7 @@ const log = (title, at) => [
 function setup(answer) {
   const stored = {
     old: { header: { id: "old", cwd: "/w/p", createdAt: now - 90 * 864e5 }, revision: `1:2:3:${BigInt(now - 90 * 864e5) * 1000000n}:0`, events: log("old work", now - 90 * 864e5) },
-    s1: { header: { id: "s1", cwd: "/w/p", createdAt: now - 3600e3 }, revision: `1:2:3:${BigInt(now) * 1000000n}:0`, events: log("recent work", now - 3600e3) },
+    s1: { header: { id: "s1", cwd: "/w/p", createdAt: recentAt }, revision: `1:2:3:${BigInt(now) * 1000000n}:0`, events: log("recent work", recentAt) },
   };
   const reads = [];
   const prompts = [];
