@@ -252,6 +252,10 @@ test("the model catalogue lists what DSH really offers and survives one bad prov
   assert.equal(body.ok, true);
   assert.deepEqual(body.models.map(m => `${m.provider}/${m.id}`), ["deepseek/v4.1-flash"]);
   assert.deepEqual(body.current, { provider: "deepseek", model: "v4.1-flash" });
+  // The failing provider is reported, not hidden: silence with no explanation
+  // is what makes a model picker look broken.
+  assert.deepEqual(body.providers.map(p => `${p.provider}:${p.models.length}`), ["deepseek:1", "broken:0"]);
+  assert.match(body.providers[1].reason ?? body.providers[1].detail, /endpoint unreachable|failed/);
 });
 
 test("with no model service the catalogue says so instead of inventing models", async () => {

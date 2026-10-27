@@ -54,8 +54,8 @@ const settings = {
   source: "dsh", provider: "", model: "", persona: "You are a careful reviewer.", includeGoal: true, includeProject: true,
   includeToolArgs: true, includeToolOutput: true, maxActivities: 60, excerptChars: 400, maxTokens: 1024, timeoutMs: 60000, hasApiKey: false,
 };
-// States: localeTick, tab, saved, form, note, busy, test, models, extModels, preview, previewError.
-const set = (extra = {}) => [0, extra.tab || "model", extra.saved === undefined ? settings : extra.saved, extra.form ?? null, extra.note || "", extra.busy || "", extra.test ?? null, extra.models === undefined ? catalog : extra.models, extra.extModels ?? null, extra.preview ?? null, extra.previewError || ""];
+// States: localeTick, tab, saved, form, note, busy, test, models, providerInfo, extModels, preview, previewError.
+const set = (extra = {}) => [0, extra.tab || "model", extra.saved === undefined ? settings : extra.saved, extra.form ?? null, extra.note || "", extra.busy || "", extra.test ?? null, extra.models === undefined ? catalog : extra.models, extra.providerInfo ?? [{ provider: "deepseek-account", name: "DeepSeek Account", models: [] }], extra.extModels ?? null, extra.preview ?? null, extra.previewError || ""];
 
 test("the settings are a centered dialog with a scrim, mounted once", () => {
   const { render, dict } = load();
@@ -165,4 +165,18 @@ test("Escape closes the dialog and focus is kept inside it", () => {
   const handler = globalThis.document.__listeners.find(l => l.type === "keydown");
   handler.fn({ key: "Escape", stopPropagation() {} });
   assert.equal(closed, 1, "Escape closes the dialog");
+});
+
+test("a silent provider is named, not just an empty dropdown", () => {
+  const { render, dict } = load();
+  const all = text(render(set({
+    models: [],
+    providerInfo: [
+      { provider: "deepseek-account", name: "DeepSeek Account", models: [] },
+      { provider: "routerlink", name: "RouterLink", models: [], reason: "ACCOUNT_SIGN_IN_REQUIRED", detail: "sign in first" },
+    ],
+  })));
+  assert.ok(all.includes("DeepSeek Account"), "every provider is listed");
+  assert.ok(all.includes(dict.providerNoModels), "silence without an error is explained");
+  assert.ok(all.includes("RouterLink") && all.includes("ACCOUNT_SIGN_IN_REQUIRED"), "a provider error is shown verbatim");
 });
