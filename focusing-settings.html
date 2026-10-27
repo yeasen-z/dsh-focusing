@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focusing · 模型设置（全局浮窗）设计原型</title>
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f6f7f9; --paper:#fff; --ink:#20252e; --muted:#848b98;
+  --line:#e9ecf1; --hover:#f5f7fa;
+  --blue:#4969de; --blue-soft:#edf1ff;
+  --green:#3a9174; --green-soft:#ecf6f1;
+  --amber:#af7927; --amber-soft:#fbf5e9;
+  --red:#c16164; --red-soft:#faeeee;
+  --shadow:0 24px 60px #1a233a2e, 0 2px 8px #1a233a14;
+  --scrim:#1a233a40;
+}
+[data-theme=dark]{
+  color-scheme:dark;
+  --bg:#16191f; --paper:#1d2129; --ink:#e3e7ee; --muted:#8b95a6;
+  --line:#2b303b; --hover:#252b35;
+  --blue:#9aafff; --blue-soft:#2a3453;
+  --green:#82c5ac; --green-soft:#233b34;
+  --amber:#d7b37b; --amber-soft:#3a3227;
+  --red:#df9a9c; --red-soft:#3d2b2c;
+  --shadow:0 24px 60px #00000080;
+  --scrim:#00000066;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #8da5f0;outline-offset:2px}
+svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+
+/* ---------- 工作台外壳（被浮窗盖住的背景，只为展示入口） ---------- */
+.app{height:100dvh;display:grid;grid-template-columns:208px minmax(0,1fr);overflow:hidden}
+.nav{background:var(--paper);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:22px 12px;gap:2px}
+.brand{display:flex;align-items:center;gap:8px;font-weight:650;font-size:16px;padding:0 10px 2px}
+.tag{font-size:11px;color:var(--muted);padding:0 10px 14px}
+.nav-label{font-size:11px;color:var(--muted);padding:12px 10px 4px}
+.nav-item{display:flex;align-items:center;gap:9px;border:0;background:none;border-radius:8px;padding:7px 10px;font-size:13px;color:var(--muted);text-align:left;width:100%}
+.nav-item:hover{background:var(--hover);color:var(--ink)}.nav-item.active{background:var(--blue-soft);color:var(--blue)}
+.nav-foot{margin-top:auto;display:grid;gap:6px}
+/* 入口 1：导航底部的"当前模型"胶囊——让"全局"一眼可见 */
+.model-chip{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;width:100%;
+  border:1px solid var(--line);background:var(--paper);border-radius:10px;padding:8px 10px;text-align:left}
+.model-chip:hover{background:var(--hover)}
+.model-chip .dot{width:7px;height:7px;border-radius:99px;background:var(--green)}
+.model-chip .dot.warn{background:var(--amber)}
+.model-chip b{display:block;font-size:12px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.model-chip small{display:block;font-size:10.5px;color:var(--muted);line-height:1.3}
+.main{overflow:auto;padding:34px 40px}
+.hero h2{margin:0 0 6px;font-size:22px}.hero p{margin:0 0 18px;color:var(--muted);font-size:13px}
+.ask{max-width:640px;background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:12px 14px;color:var(--muted)}
+.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:22px;max-width:760px}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px;font-size:12.5px;color:var(--muted)}
+.card b{display:block;color:var(--ink);font-size:13px;margin-bottom:2px}
+/* 入口 2：整理失败/草稿提示里的"去设置" */
+.notice{display:flex;gap:10px;align-items:center;max-width:640px;margin-top:18px;padding:10px 14px;border-radius:10px;background:var(--amber-soft);font-size:12.5px}
+.notice button{margin-left:auto;border:1px solid var(--line);background:var(--paper);border-radius:8px;padding:3px 11px;font-size:12px}
+
+/* ---------- 浮窗 ---------- */
+.scrim{position:fixed;inset:0;background:var(--scrim);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;padding:20px;z-index:50}
+.scrim.open{display:flex;animation:fade .14s ease-out}
+@keyframes fade{from{opacity:0}}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.985)}}
+.dialog{width:min(480px,100%);max-height:min(640px,calc(100dvh - 40px));display:flex;flex-direction:column;
+  background:var(--paper);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);animation:pop .16s ease-out}
+.dlg-head{display:flex;align-items:flex-start;gap:12px;padding:18px 20px 12px}
+.dlg-head h3{margin:0;font-size:15px}
+.dlg-head p{margin:2px 0 0;font-size:12px;color:var(--muted)}
+.dlg-x{margin-left:auto;border:0;background:none;color:var(--muted);border-radius:8px;padding:4px;display:grid;place-items:center}
+.dlg-x:hover{background:var(--hover);color:var(--ink)}
+.scope{display:flex;flex-wrap:wrap;gap:6px;padding:0 20px 4px}
+.scope span{font-size:11px;color:var(--blue);background:var(--blue-soft);border-radius:99px;padding:1px 9px}
+.dlg-body{padding:10px 20px 6px;overflow:auto;display:grid;gap:16px}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:14px 20px 0}
+.tabs button{border:0;background:none;padding:7px 12px;font-size:12.5px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:0}
+.tabs button.on{color:var(--ink);border-bottom-color:var(--blue);font-weight:550}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--hover);border-radius:10px;padding:3px}
+.seg button{border:0;background:none;border-radius:8px;padding:6px 8px;font-size:12.5px;color:var(--muted)}
+.seg button.on{background:var(--paper);color:var(--ink);box-shadow:0 1px 3px #1a233a1a;font-weight:550}
+.field{display:grid;gap:5px}
+.field>label,.field>.lab{font-size:12px;font-weight:550}
+.field small{font-size:11.5px;color:var(--muted)}
+.input,select.input{width:100%;border:1px solid var(--line);background:var(--paper);border-radius:9px;padding:7px 10px;font-size:13px}
+.input:focus{border-color:var(--blue)}
+.row{display:flex;gap:8px;align-items:stretch}.row .input{flex:1;min-width:0}
+.btn{border:1px solid var(--line);background:var(--paper);border-radius:9px;padding:6px 12px;font-size:12.5px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}[data-theme=dark] .btn.primary{color:#16191f}
+.btn.primary:disabled{opacity:.4;cursor:default}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.link{border:0;background:none;color:var(--blue);padding:0}
+.hide{display:none!important}
+.test{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px dashed var(--line);border-radius:10px}
+.pill{font-size:11.5px;border-radius:99px;padding:1px 9px}
+.pill.ok{background:var(--green-soft);color:var(--green)}.pill.bad{background:var(--red-soft);color:var(--red)}.pill.idle{background:var(--hover);color:var(--muted)}
+.test .msg{font-size:12px;color:var(--muted);flex-basis:100%;margin-top:-2px;overflow-wrap:anywhere}
+.spin{width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:99px;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+details.adv{border-top:1px solid var(--line);padding-top:10px}
+details.adv summary{font-size:12px;color:var(--muted);cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px}
+details.adv summary::before{content:"▸";font-size:10px;transition:transform .12s}details.adv[open] summary::before{transform:rotate(90deg)}
+.adv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}
+.other{background:var(--hover);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center}
+.other b{color:var(--ink);font-weight:550}
+.lock{font-size:11.5px;color:var(--muted);display:flex;gap:6px;align-items:flex-start}
+.dlg-foot{display:flex;align-items:center;gap:8px;padding:12px 20px 16px;border-top:1px solid var(--line);margin-top:8px}
+.dirty{font-size:11.5px;color:var(--amber);margin-right:auto}
+.dirty.clean{color:var(--muted)}
+
+/* ---------- 原型控制条（不属于产品） ---------- */
+.proto{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:80;background:#20252ee6;color:#fff;border-radius:12px;padding:6px 8px;display:flex;gap:4px;font-size:12px;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 20px)}
+.proto button{border:0;background:none;color:#cfd5e2;border-radius:8px;padding:4px 10px}.proto button:hover{background:#ffffff1f;color:#fff}
+.proto i{width:1px;background:#ffffff33;margin:3px 2px}
+.toast{position:fixed;top:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:7px 16px;border-radius:9px;font-size:12px;z-index:90;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.on{opacity:1}
+@media (max-width:760px){.app{grid-template-columns:1fr}.nav{display:none}.main{padding:20px}.cards{grid-template-columns:1fr}.adv-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3"/></symbol>
+    <symbol id="chev" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+    <symbol id="check" viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"/></symbol>
+    <symbol id="home" viewBox="0 0 24 24"><path d="m4 11 8-7 8 7v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1Z"/></symbol>
+    <symbol id="layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5ZM3 13l9 5 9-5"/></symbol>
+    <symbol id="doc" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6ZM14 3v4h4M9 12h6M9 16h6"/></symbol>
+    <symbol id="users" viewBox="0 0 24 24"><path d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14.8c1.8.7 3 2.6 3 5.2"/></symbol>
+    <symbol id="pulse" viewBox="0 0 24 24"><path d="M3 12h4l2.5-7 5 14L17 12h4"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <nav class="nav" aria-label="Focusing">
+    <div class="brand">Focusing</div><div class="tag">你的 context · session 管家</div>
+    <button class="nav-item active"><svg><use href="#home"/></svg>工作台</button>
+    <div class="nav-label">能力</div>
+    <button class="nav-item"><svg><use href="#layers"/></svg>上下文记录</button>
+    <button class="nav-item"><svg><use href="#doc"/></svg>整理与报告</button>
+    <button class="nav-item"><svg><use href="#users"/></svg>协作室</button>
+    <button class="nav-item"><svg><use href="#pulse"/></svg>专注纠偏</button>
+    <div class="nav-foot">
+      <!-- 入口 1 -->
+      <button class="model-chip" id="chip" aria-haspopup="dialog" onclick="openDlg()" title="整理、追问、协作室、专注纠偏共用的模型">
+        <span class="dot" id="chipDot"></span>
+        <span><small>分析模型 · 全局</small><b id="chipName">跟随 DSH 默认</b></span>
+        <svg><use href="#chev"/></svg>
+      </button>
+    </div>
+  </nav>
+  <main class="main">
+    <div class="hero"><h2>想了解你的工作上下文什么？</h2><p>Focusing 汇集所有会话的上下文，直接提出要求，由它整理与分析。</p></div>
+    <div class="ask">例如：整理我这周干了什么，进度如何</div>
+    <!-- 入口 2：模型出问题时，错误提示里直接带"去设置" -->
+    <div class="notice" id="notice">模型暂不可用，已生成不经模型的草稿。<button onclick="openDlg()">去设置模型</button></div>
+    <div class="cards">
+      <div class="card"><b>上下文记录整理</b>周报、日报、交接文档。</div>
+      <div class="card"><b>协作室</b>多个会话的快照，各自发言。</div>
+      <div class="card"><b>专注纠偏</b>盯住一个会话是否在打转。</div>
+    </div>
+  </main>
+</div>
+
+<!-- ======================= 浮窗 ======================= -->
+<div class="scrim" id="scrim" onmousedown="if(event.target===this)closeDlg()">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dt" id="dlg">
+    <div class="dlg-head">
+      <div>
+        <h3 id="dt">模型设置</h3>
+        <p>这里选的模型对整个 Focusing 生效，不影响你聊天用的模型。</p>
+      </div>
+      <button class="dlg-x" onclick="closeDlg()" aria-label="关闭"><svg><use href="#x"/></svg></button>
+    </div>
+    <div class="scope" aria-label="使用范围"><span>整理与报告</span><span>追问</span><span>协作室（可逐人覆盖）</span><span>专注纠偏</span></div>
+
+    <div class="dlg-body">
+      <div class="tabs" role="tablist" aria-label="设置分组">
+        <button role="tab" id="tabM" class="on" onclick="setPanel('model')">模型与连接</button>
+        <button role="tab" id="tabF" onclick="setPanel('focus')">专注纠偏的内容</button>
+      </div>
+      <div class="seg" role="tablist" aria-label="模型来源" id="srcSeg">
+        <button role="tab" id="tabDsh" class="on" onclick="setSource('dsh')">DSH 里的模型</button>
+        <button role="tab" id="tabExt" onclick="setSource('external')">外部接口</button>
+      </div>
+
+      <!-- DSH 模型：下拉选择，不用手填 -->
+      <section id="paneDsh" class="field">
+        <label for="selDsh">模型</label>
+        <select class="input" id="selDsh" onchange="markDirty()">
+          <option value="">跟随 DSH 当前默认模型（现为 deepseek-chat）</option>
+          <optgroup label="DeepSeek">
+            <option>deepseek-chat</option><option>deepseek-reasoner</option>
+          </optgroup>
+          <optgroup label="Anthropic">
+            <option>claude-sonnet-4-5</option><option>claude-haiku-4-5</option>
+          </optgroup>
+          <optgroup label="OpenAI">
+            <option>gpt-4.1</option><option>gpt-4.1-mini</option>
+          </optgroup>
+        </select>
+        <small>列表来自 DSH 当前已授权的模型，复用它们的授权，不新建 agent。</small>
+      </section>
+
+      <!-- 外部接口：地址 + 密钥 → 获取列表 → 选择（仍可手填） -->
+      <section id="paneExt" class="hide" style="display:grid;gap:12px">
+        <div class="field">
+          <label for="ep">接口地址</label>
+          <input class="input" id="ep" value="https://api.example.com/v1/chat/completions" oninput="markDirty();resetModels()">
+          <small>OpenAI 兼容的 chat completions 地址。</small>
+        </div>
+        <div class="field">
+          <label for="key">API Key</label>
+          <input class="input" id="key" type="password" placeholder="•••••••• 已保存，留空表示不修改" oninput="markDirty();resetModels()">
+        </div>
+        <div class="field">
+          <span class="lab">模型</span>
+          <div class="row">
+            <input class="input" id="extModelText" list="extList" value="gpt-4o-mini" oninput="markDirty()" aria-label="模型名">
+            <datalist id="extList"></datalist>
+            <button class="btn" id="fetchBtn" onclick="fetchModels()">获取列表</button>
+          </div>
+          <small id="fetchNote">点「获取列表」从该接口读取可选模型；接口不提供时也可直接手填。</small>
+        </div>
+      </section>
+
+      <div class="test" id="test">
+        <button class="btn" id="testBtn" onclick="runTest()">测试连接</button>
+        <span class="pill idle" id="testPill">未测试</span>
+        <span class="msg hide" id="testMsg"></span>
+      </div>
+
+      <details class="adv">
+        <summary>高级：输出长度 / 超时 / 随机度</summary>
+        <div class="adv-grid">
+          <div class="field"><label for="mt">最大输出 tokens</label><input class="input" id="mt" type="number" value="1024" oninput="markDirty()"></div>
+          <div class="field"><label for="to">超时（秒）</label><input class="input" id="to" type="number" value="60" oninput="markDirty()"></div>
+          <div class="field"><label for="tp">temperature</label><input class="input" id="tp" placeholder="留空不发送" oninput="markDirty()"></div>
+        </div>
+      </details>
+
+      <!-- 第二个标签页：专注纠偏的提示词与内容开关，同一个浮窗统一设置 -->
+      <section id="paneFocus" class="hide" style="display:grid;gap:12px">
+        <div class="field">
+          <span class="lab">分析提示词</span>
+          <textarea class="input" rows="7" id="persona" oninput="markDirty()">You are a careful reviewer of a coding agent's work log. Read the activity below and judge, in plain language, whether the agent is stuck or making progress.</textarea>
+          <div class="row"><button class="btn" onclick="document.getElementById('persona').value='';markDirty()">恢复默认</button>
+            <small style="align-self:center">输出格式（结论 / 证据 / 下一步）由程序固定附加，不在这里改。</small></div>
+        </div>
+        <div class="field">
+          <span class="lab">送给专注纠偏的内容</span>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">
+            <label><input type="checkbox" checked onchange="markDirty()"> 任务目标</label>
+            <label><input type="checkbox" checked onchange="markDirty()"> 项目目录</label>
+            <label><input type="checkbox" checked onchange="markDirty()"> 工具参数</label>
+            <label><input type="checkbox" checked onchange="markDirty()"> 工具输出</label>
+          </div>
+          <div class="adv-grid" style="grid-template-columns:1fr 1fr">
+            <div class="field"><label for="ma">最多条目数</label><input class="input" id="ma" type="number" value="60" oninput="markDirty()"></div>
+            <div class="field"><label for="ec">每条截断字符</label><input class="input" id="ec" type="number" value="400" oninput="markDirty()"></div>
+          </div>
+        </div>
+      </section>
+      <div class="lock"><svg><use href="#lock"/></svg>密钥只保存在本机，不会显示在页面或导出文件里；只有你点「开始整理 / 让 A 发言 / 分析一下」时才会调用模型。</div>
+    </div>
+
+    <div class="dlg-foot">
+      <span class="dirty clean" id="dirty">没有未保存的更改</span>
+      <button class="btn" onclick="closeDlg()">取消</button>
+      <button class="btn primary" id="saveBtn" disabled onclick="save()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<div class="proto" aria-label="原型控制（不属于产品）">
+  <button onclick="openDlg()">打开浮窗</button><i></i>
+  <button onclick="demo('dsh')">状态：DSH 模型</button>
+  <button onclick="demo('ext')">状态：外部接口</button>
+  <button onclick="demo('bad')">状态：测试失败</button><i></i>
+  <button onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'':'dark'">深色</button>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let panel='model';
+let source='dsh', dirty=false, saved={source:'dsh',name:'跟随 DSH 默认'}, lastFocus=null;
+
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('on'),2200)}
+function openDlg(){lastFocus=document.activeElement;$('scrim').classList.add('open');setTimeout(()=>$('dlg').querySelector('.seg button.on').focus(),0)}
+function closeDlg(){$('scrim').classList.remove('open');lastFocus?.focus?.()}
+document.addEventListener('keydown',e=>{
+  if(!$('scrim').classList.contains('open'))return;
+  if(e.key==='Escape'){e.stopPropagation();closeDlg()}
+  if(e.key==='Tab'){ // 简易焦点圈定
+    const f=[...$('dlg').querySelectorAll('button,input,select,summary')].filter(x=>!x.disabled&&x.offsetParent!==null);
+    const first=f[0],last=f.at(-1);
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
+  }
+});
+function setSource(s){
+  source=s;
+  $('tabDsh').classList.toggle('on',s==='dsh');$('tabExt').classList.toggle('on',s==='external');
+  $('tabDsh').setAttribute('aria-selected',s==='dsh');$('tabExt').setAttribute('aria-selected',s==='external');
+  $('paneDsh').classList.toggle('hide',s!=='dsh');$('paneExt').classList.toggle('hide',s==='dsh');
+  resetTest();markDirty();
+}
+function markDirty(){dirty=true;$('saveBtn').disabled=false;$('dirty').textContent='有未保存的更改';$('dirty').classList.remove('clean')}
+function clean(){dirty=false;$('saveBtn').disabled=true;$('dirty').textContent='没有未保存的更改';$('dirty').classList.add('clean')}
+function resetTest(){const p=$('testPill');p.className='pill idle';p.textContent='未测试';$('testMsg').classList.add('hide')}
+function resetModels(){resetTest()}
+
+function fetchModels(){
+  const b=$('fetchBtn');b.disabled=true;b.innerHTML='<span class="spin"></span>读取中…';
+  setTimeout(()=>{
+    $('extList').innerHTML=['gpt-4o','gpt-4o-mini','gpt-4.1','o4-mini','text-embedding-3-small'].map(m=>`<option value="${m}">`).join('');
+    b.disabled=false;b.textContent='获取列表';
+    $('fetchNote').textContent='已获取 5 个模型：点击输入框右侧展开，或直接输入。';
+    $('extModelText').focus();$('extModelText').value='';
+  },700);
+}
+function runTest(forceBad){
+  const b=$('testBtn'),p=$('testPill'),m=$('testMsg');
+  b.disabled=true;p.className='pill idle';p.innerHTML='<span class="spin" style="display:inline-block;vertical-align:-2px"></span> 测试中';m.classList.add('hide');
+  setTimeout(()=>{
+    b.disabled=false;
+    const bad=forceBad===true;
+    p.className='pill '+(bad?'bad':'ok');
+    p.textContent=bad?'连接失败':'连接成功';
+    m.classList.remove('hide');
+    m.textContent=bad?'bad-key · HTTP 401：Incorrect API key provided. 请检查 API Key。':`${source==='dsh'?($('selDsh').value||'deepseek-chat'):$('ep').value.split('/')[2]+'/'+$('extModelText').value} · 1.2 s · 只发送了一句测试，没有带任何会话内容`;
+  },900);
+}
+function save(){
+  const name=source==='dsh'?($('selDsh').value||'跟随 DSH 默认'):$('extModelText').value||'外部接口';
+  saved={source,name};
+  $('chipName').textContent=name;$('chipDot').className='dot';
+  $('notice').classList.add('hide');
+  clean();closeDlg();toast('已保存：整理、追问、协作室、专注纠偏都会使用「'+name+'」');
+}
+function setPanel(p){
+  const focus=p==='focus';
+  $('tabM').classList.toggle('on',!focus);$('tabF').classList.toggle('on',focus);
+  $('paneDsh').classList.toggle('hide',focus||source==='external');
+  $('paneExt').classList.toggle('hide',focus||source!=='external');
+  $('srcSeg').classList.toggle('hide',focus);
+  $('paneFocus').classList.toggle('hide',!focus);
+}
+function demo(k){
+  openDlg();
+  if(k==='dsh'){setSource('dsh');resetTest();clean()}
+  if(k==='ext'){setSource('external');resetTest();clean()}
+  if(k==='bad'){setSource('external');clean();runTest(true)}
+}
+clean();
+</script>
+</body>
+</html>

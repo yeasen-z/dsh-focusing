@@ -85,8 +85,13 @@ test("records and digests views render lists", () => {
   assert.ok(all.includes("本周工作整理"));
 });
 
-// Room states start at index 22: rooms, roomId, room, roomErr, form, pickList, modelList, sayText, roomBusy.
-const base = view => [0, view, null, null, "", [], "", "", null, "", false, "", "this-week", "", "", null, "", null, null, "", false, Date.now()];
+// Room states start at index 24: rooms, roomId, room, roomErr, form, pickList, modelList, sayText, roomBusy.
+// Workbench hook order: localeTick, view, digestId, digest, digestError, digests,
+// ask, range, home, fu, fuBusy, fuError, recRange, recQuery, recProject, records,
+// recError, expanded, detail, toast, settingsOpen, settingsTab, savedModel, now,
+// rooms, roomId, room, roomErr, form, pickList, modelList, sayText, roomBusy.
+const base = view => [...[0, view, null, null, "", [], "", "", null, "", false, "", "this-week", "", "",
+  null, "", null, null, "", false, "model", null, Date.now()]];
 
 test("rooms view lists rooms and the new-room form offers sessions and per-participant models", () => {
   const { render, dict } = load();

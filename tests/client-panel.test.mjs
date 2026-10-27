@@ -53,19 +53,19 @@ function loadPanel() {
   return { React, Panel, dicts };
 }
 
-function renderState({ data = null, sessions = [], picked = null, busy = false, reviewError = '', reviewDetail = '', showSettings = false, draft = null, models = null, rosterFilter = 'all', extModels = null }) {
+function renderState({ data = null, sessions = [], picked = null, busy = false, reviewError = '', reviewDetail = '', rosterFilter = 'all', openSettings = () => {} }) {
   const { React, Panel, dicts } = loadPanel();
   // Hook order: data, sessions, picked, query, tab, error, tick, busy,
-  // reviewError, reviewDetail, localeTick, showSettings, draft, saveNote,
-  // testing, preview, previewError, models, collapsed, rosterFilter, extModels.
-  const values = [data, sessions, picked, '', 'overview', '', 0, busy, reviewError, reviewDetail, 0, showSettings, draft, '', false, null, '', models, {}, rosterFilter, extModels];
+  // reviewError, reviewDetail, localeTick, preview, previewError, modelSummary,
+  // collapsed, rosterFilter. (Settings lives in its own dialog now.)
+  const values = [data, sessions, picked, '', 'overview', '', 0, busy, reviewError, reviewDetail, 0, null, '', null, {}, rosterFilter];
   let index = 0;
   React.useState = initial => {
     const slot = index++;
     if(values[slot] === undefined) values[slot] = initial;
     return [values[slot], next => { values[slot] = typeof next === 'function' ? next(values[slot]) : next; }];
   };
-  const tree = Panel({ t: (key) => dicts[key], subscribeLocale: () => () => {} });
+  const tree = Panel({ t: (key) => dicts[key], subscribeLocale: () => () => {}, openSettings });
   const buttons = [];
   const nodes = [];
   const walk = (node) => {
@@ -92,85 +92,10 @@ test('the settings entry exists in the top bar before any session is loaded', ()
   assert.ok(byLabel(buttons, dicts, 'analysisSettings'), 'no way to configure analysis was offered');
 });
 
-test('the settings panel shows source, model, prompt and scope controls', () => {
-  const { nodes, dicts } = renderState({ picked: 's1', data: detailWithSettings, showSettings: true });
-  const textarea = nodes.find(n => n.type === 'textarea');
-  assert.ok(textarea, 'the persona must be editable');
-  assert.equal(textarea.props.value, 'You are a careful reviewer.');
-  const checks = nodes.filter(n => n.props?.type === 'checkbox');
-  assert.equal(checks.length, 4, 'four visibility switches');
-  const numbers = nodes.filter(n => n.props?.type === 'number');
-  assert.ok(numbers.length >= 5, 'numeric limits must be editable');
-  const radios = nodes.filter(n => n.props?.type === 'radio');
-  assert.equal(radios.length, 2, 'choose the Host model or an external endpoint');
-  const labels = nodes.filter(n => n.type === 'label').map(labelOf).join(' ');
-  assert.match(labels, new RegExp(dicts.provider));
-});
 
-test('choosing the external source reveals endpoint, key and model fields', () => {
-  const { nodes, dicts } = renderState({
-    picked: 's1', data: detailWithSettings, showSettings: true,
-    draft: { ...analysis, source: 'external' },
-  });
-  const labels = nodes.filter(n => n.type === 'label').map(labelOf).join(' ');
-  assert.match(labels, new RegExp(dicts.endpoint));
-  assert.match(labels, new RegExp(dicts.apiKey));
-  assert.match(labels, new RegExp(dicts.externalModel));
-  const password = nodes.find(n => n.props?.type === 'password');
-  assert.ok(password, 'the key field must be masked');
-  assert.equal(password.props.value, '', 'the key is never pre-filled into the panel');
-});
 
-test('saving posts the edited settings to the settings endpoint, not the analysis endpoint', async () => {
-  const requests = [];
-  globalThis.fetch = async (url, init) => {
-    requests.push({ url, init });
-    return { ok: true, json: async () => ({ ok: true, settings: { ...analysis, model: 'reviewer-x' } }) };
-  };
-  const h = renderState({
-    picked: 's1', data: detailWithSettings, showSettings: true,
-    draft: { ...analysis, model: 'reviewer-x' },
-  });
-  const { buttons, dicts } = h;
-  const btn = byLabel(buttons, dicts, 'saveSettings');
-  await btn.props.onClick();
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, '/api/dsh-focusing.settings');
-  assert.equal(requests[0].init.method, 'POST');
-  const body = JSON.parse(requests[0].init.body);
-  assert.equal(body.settings.model, 'reviewer-x');
-  assert.equal(body.test, false, 'saving must not trigger a review or a test');
-});
 
-test('the connection test asks the Host to test and shows the result', async () => {
-  const requests = [];
-  globalThis.fetch = async (url, init) => {
-    requests.push({ init });
-    return { ok: true, json: async () => ({ ok: true, settings: analysis, test: { ok: true, model: 'p/m' } }) };
-  };
-  const h = renderState({ picked: 's1', data: detailWithSettings, showSettings: true, draft: analysis });
-  await byLabel(h.buttons, h.dicts, 'testConnection').props.onClick();
-  assert.equal(JSON.parse(requests[0].init.body).test, true);
-  assert.match(h.values[13], new RegExp(h.dicts.settingsTestOk), '13 is saveNote');
-});
 
-test('preview loads the exact payload from the Host', async () => {
-  let url;
-  globalThis.fetch = async u => {
-    url = u;
-    return { ok: true, json: async () => ({ ok: true, model: 'p/m', system: 'SYS', user: 'USER' }) };
-  };
-  const h = renderState({ picked: 's1', data: detailWithSettings, showSettings: true, draft: analysis });
-  await byLabel(h.buttons, h.dicts, 'previewPayload').props.onClick();
-  assert.equal(url, '/api/dsh-focusing.preview?session=s1');
-  assert.equal(h.values[15].system, 'SYS', '15 is preview');
-});
-
-test('reset restores the default persona', () => {
-  const h = renderState({ picked: 's1', data: detailWithSettings, showSettings: true, draft: analysis });
-  byLabel(h.buttons, h.dicts, 'resetPersona').props.onClick();
-  assert.equal(h.values[12].persona, undefined, 'an undefined persona falls back to the default');
-});
 
 test("clicking Analyze actually sends one POST to the analysis endpoint", async () => {
   const { buttons, dicts } = renderState({ picked: "s1", data: detail });
@@ -215,12 +140,11 @@ test('only one analysis action exists in loading, result, and failure states', (
   }
 });
 
-test('click surfaces network errors in the overview and closes settings', async () => {
+test('click surfaces network errors in the overview', async () => {
   const h = renderState({ picked: 's1', data: detail });
   globalThis.fetch = async () => { throw new Error('Network unavailable'); };
   await findAnalyze(h.buttons, h.dicts).props.onClick();
   assert.equal(h.values[4], 'overview');
-  assert.equal(h.values[11], false);
   assert.equal(h.values[7], false);
   assert.equal(h.values[8], 'failed');
   assert.equal(h.values[9], 'Network unavailable');
@@ -278,33 +202,7 @@ test('review action stays beside its result rather than in the top bar', () => {
   assert.equal(tabs.length, 1);
 });
 
-test('the model field offers the models DSH reports instead of a free-text id', () => {
-  const models = [{ provider: 'deepseek', providerName: 'DeepSeek', id: 'v4.1-flash', name: 'Flash' }];
-  const h = renderState({ picked: 's1', data: detailWithSettings, showSettings: true, models });
-  const select = h.nodes.find(n => n.type === 'select');
-  assert.ok(select, 'a select is rendered when the catalogue is known');
-  const options = h.nodes.filter(n => n.type === 'option').map(o => o.props.value);
-  assert.ok(options.includes('deepseek/v4.1-flash'));
-  select.props.onChange({ target: { value: 'deepseek/v4.1-flash' } });
-  assert.equal(h.values[12].model, 'v4.1-flash');
-  assert.equal(h.values[12].provider, 'deepseek');
-});
 
-test('settings open alongside the session with collapsible advanced fields', () => {
-  const h = renderState({ picked: 's1', data: detailWithSettings, showSettings: true });
-  const drawer = h.nodes.find(n => n.props?.className === 'fz-drawer');
-  assert.ok(drawer);
-  assert.ok(h.nodes.find(n => n.props?.className === 'fz-diagnosis'));
-  const advanced = h.nodes.find(n => n.type === 'details' && deepText(n).startsWith(h.dicts.advanced));
-  assert.ok(advanced);
-  assert.notEqual(advanced.props.open, true);
-  const seconds = h.nodes.find(n => n.type === 'input' && n.props?.max === 300);
-  assert.equal(seconds.props.value, 60);
-  seconds.props.onChange({ target: { value: '45' } });
-  assert.equal(h.values[12].timeoutMs, 45000);
-  drawer.props.onKeyDown({ key: 'Escape', stopPropagation() {} });
-  assert.equal(h.values[11], false);
-});
 
 test('review renders evidence and next action with a folded original reply', () => {
   const h = renderState({ picked: 's1', data: { ...detail, review: {
@@ -407,29 +305,3 @@ test('the reviewed filter explains an empty result', () => {
   assert.ok(nodes.some(n => deepText(n) === dicts.noReviewed));
 });
 
-test('external model: fetch button, fetched select and a free-text fallback', async () => {
-  const draft = { ...analysis, source: 'external', endpoint: 'https://api.x.com/v1/chat/completions', externalModel: 'b' };
-  const before = renderState({ picked: 's1', data: detail, showSettings: true, draft });
-  const fetchBtn = before.nodes.find(n => n.type === 'button' && deepText(n) === before.dicts.fetchModels);
-  assert.ok(fetchBtn, 'a fetch-models button is offered');
-  assert.ok(before.nodes.some(n => n.type === 'input' && n.props?.list === 'fz-ext-models'), 'typing a custom id stays possible');
-
-  let sent;
-  globalThis.fetch = async (url, init) => { sent = { url, body: JSON.parse(init.body) }; return { ok: true, json: async () => ({ ok: true, models: ['a', 'b'] }) }; };
-  await fetchBtn.props.onClick();
-  assert.equal(sent.url, '/api/dsh-focusing.external-models');
-  assert.equal(sent.body.endpoint, 'https://api.x.com/v1/chat/completions');
-  assert.deepEqual(before.values[20], { models: ['a', 'b'] }, '20 is extModels');
-
-  const after = renderState({ picked: 's1', data: detail, showSettings: true, draft, extModels: { models: ['a', 'b'] } });
-  const select = after.nodes.find(n => n.type === 'select' && n.props?.['aria-label'] === after.dicts.externalModel);
-  assert.ok(select);
-  assert.equal(select.props.value, 'b');
-  const datalist = after.nodes.find(n => n.type === 'datalist');
-  assert.equal(datalist.children.length, 2);
-});
-
-test('the DSH source explains why typing is needed when the catalogue is empty', () => {
-  const { nodes, dicts } = renderState({ picked: 's1', data: detail, showSettings: true, draft: { ...analysis }, models: [] });
-  assert.ok(nodes.some(n => n.props?.className === 'fz-field-hint fz-no-catalog' && deepText(n) === dicts.noCatalogHint));
-});
