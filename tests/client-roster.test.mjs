@@ -138,6 +138,13 @@ test("turning the setting on lists archived chats, marked as such", async t => {
   const row = all(tree).find(n => n.props?.className?.includes("archived"));
   assert.ok(row, "the row carries the archived class");
   assert.match(row.props.title, /已归档$/, "and says so on hover");
+  const tag = all(row).find(n => n.props?.className === "fz-archived-tag");
+  assert.ok(tag, "and carries a visible tag, not only a faded row");
+  assert.deepEqual(tag.children, ["已归档"], "reading the label in the reader's language");
+  const live = all(tree).filter(n => n.props?.className === "fz-session-title" && n.children[0] === "一分钟前");
+  assert.ok(live.length > 0, "a live chat in the same list");
+  const tags = all(tree).filter(n => n.props?.className === "fz-archived-tag");
+  assert.equal(tags.length, 1, "only the archived chat carries the tag");
   stop();
 });
 
