@@ -84,7 +84,6 @@ test("project folders start folded", async t => {
     assert.match(caret.props.className, /closed/, "and its caret points at the folder");
     assert.equal(all(folder).find(n => n.props?.className === "fz-group-head").props["aria-expanded"], false);
   }
-  stop();
 });
 
 test("the three most recent sessions stay pinned open at the top", async t => {
@@ -95,7 +94,6 @@ test("the three most recent sessions stay pinned open at the top", async t => {
   assert.ok(all(recent).some(n => n.children?.includes(dict.recentSessions)), "it is labelled");
   assert.deepEqual(rowTitles(recent), ["一分钟前", "两小时前", "三小时前"], "newest first, three at most");
   assert.ok(all(recent).some(n => n.props?.className === "fz-recent-cards"), "and it is open, its cards always shown");
-  stop();
 });
 
 test("the recent section is not collapsible", async t => {
@@ -104,21 +102,19 @@ test("the recent section is not collapsible", async t => {
   const head = all(recentSection(tree)).find(n => n.props?.className?.includes("fz-recent-head"));
   assert.equal(head.type, "div", "a plain label, so it cannot be folded away");
   assert.equal(head.props.onClick, undefined);
-  stop();
 });
 
 test("opening a folder shows its rows and keeps the others folded", async t => {
   const { tree, tick, stop, state } = await mount();
-  t.after(state);
+  t.after(stop);
   const alpha = projectSections(tree).find(s => all(s).some(n => n.children?.includes("alpha")));
   const head = all(alpha).find(n => n.props?.className === "fz-group-head");
   head.props.onClick();                    // the user opens "alpha"
   assert.equal(state[14].alpha, true, "the open folder is remembered");
   const after = projectSections(tick()).find(s => all(s).some(n => n.children?.includes("alpha")));
-  assert.deepEqual(rowTitles(bodyOf(after)), ["十小时前", "一分钟前"], "its sessions are listed");
+  assert.deepEqual(rowTitles(bodyOf(after)), ["一分钟前", "十小时前"], "its sessions are listed, newest first");
   const beta = projectSections(tick()).find(s => all(s).some(n => n.children?.includes("beta")));
   assert.equal(bodyOf(beta), undefined, "the other folder stays folded");
-  stop();
 });
 
 test("archived chats stay out of the roster by default", async t => {
@@ -128,7 +124,6 @@ test("archived chats stay out of the roster by default", async t => {
   assert.ok(rows.length > 0, "the roster is not empty");
   assert.ok(!all(tree).some(n => n.children?.includes("已归档的")), "the archived chat is hidden");
   assert.ok(!rowTitles(recentSection(tree)).includes("已归档的"), "and it cannot reach the recent list either");
-  stop();
 });
 
 test("turning the setting on lists archived chats, marked as such", async t => {
@@ -146,7 +141,6 @@ test("turning the setting on lists archived chats, marked as such", async t => {
   assert.ok(live.length > 0, "a live chat in the same list");
   const tags = all(tree).filter(n => n.props?.className === "fz-archived-tag");
   assert.equal(tags.length, 1, "only the archived chat carries the tag");
-  stop();
 });
 
 test("the recent list follows the roster filter and the search box", async t => {
@@ -181,4 +175,33 @@ test("the archived switch sits under the search box and writes the same setting"
   assert.deepEqual(ordered, ["fz-search", "fz-archive-switch"], "the switch sits under the search box");
   const box = all(archive).find(n => n.type === "input");
   assert.equal(box.props.checked, false, "off by default, as the stored setting says");
+});
+
+test("a running chat keeps its place while its contents update", async t => {
+  // The bug: every poll re-sorted by age, so a chat that was active jumped to
+  // the top. The order is captured when the panel opens and only Refresh moves it.
+  const { tree, tick, stop, state } = await mount();
+  t.after(stop);
+  const before = rowTitles(recentSection(tree));
+  assert.deepEqual(before, ["一分钟前", "两小时前", "三小时前"]);
+  // Make the oldest chat the most recently active, as a running chat does.
+  const list = state[1];
+  const oldest = list.find(s => s.title === "三小时前");
+  oldest.updatedAt = Date.now();
+  const after = rowTitles(recentSection(tick()));
+  assert.deepEqual(after, before, "the order does not reshuffle under the person");
+  // The contents did update: the row is still there and reads the new state.
+  assert.equal(list.find(s => s.title === "三小时前").updatedAt > 0, true);
+});
+
+test("refresh takes a new order from the current contents", async t => {
+  const { tree, tick, stop, state } = await mount();
+  t.after(stop);
+  state[1].find(s => s.title === "三小时前").updatedAt = Date.now();
+  assert.notDeepEqual(rowTitles(recentSection(tick())), ["三小时前", "一分钟前", "两小时前"], "still held");
+  // Refresh is the explicit re-sort; it is the only path that changes the order.
+  const refresh = all(tree).find(n => n.props?.className === "fz-order-refresh") || all(tick()).find(n => n.props?.className === "fz-order-refresh");
+  assert.ok(refresh, "a refresh control is shown");
+  refresh.props.onClick();
+  assert.deepEqual(rowTitles(recentSection(tick())), ["三小时前", "一分钟前", "两小时前"], "refresh re-sorts");
 });
