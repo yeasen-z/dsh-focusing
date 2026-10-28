@@ -68,7 +68,9 @@ async function mount({ filter = "all", query = "", loadArchived = false } = {}) 
 const all = tree => { const out = []; const visit = n => { if (n && typeof n === "object") { out.push(n); (n.children || []).forEach(visit); } }; visit(tree); return out; };
 const projectSections = tree => all(tree).filter(n => n.type === "section" && n.props?.className === "fz-group" && n.props?.key !== "__recent__");
 const recentSection = tree => all(tree).find(n => n.props?.className === "fz-group fz-recent");
-const rowTitles = section => all(section).filter(n => n.props?.className === "fz-session-title").map(n => n.children[0]);
+// The recent list shows cards and the folders show rows; both carry the title in a
+// dedicated span, so the helper reads either.
+const rowTitles = section => all(section).filter(n => n.props?.className === "fz-session-title" || n.props?.className === "fz-recent-card-title").map(n => n.children[0]);
 const bodyOf = section => all(section).find(n => n.props?.className === "fz-group-body");
 
 test("project folders start folded", async t => {
@@ -92,7 +94,7 @@ test("the three most recent sessions stay pinned open at the top", async t => {
   assert.ok(recent, "a recent section exists");
   assert.ok(all(recent).some(n => n.children?.includes(dict.recentSessions)), "it is labelled");
   assert.deepEqual(rowTitles(recent), ["一分钟前", "两小时前", "三小时前"], "newest first, three at most");
-  assert.ok(bodyOf(recent), "and it is open");
+  assert.ok(all(recent).some(n => n.props?.className === "fz-recent-cards"), "and it is open, its cards always shown");
   stop();
 });
 
@@ -122,7 +124,7 @@ test("opening a folder shows its rows and keeps the others folded", async t => {
 test("archived chats stay out of the roster by default", async t => {
   const { tree, stop } = await mount();
   t.after(stop);
-  const rows = all(tree).filter(n => /^fz-session( |$)/.test(String(n.props?.className)));
+  const rows = all(tree).filter(n => /^fz-(session|recent-card)( |$)/.test(String(n.props?.className)));
   assert.ok(rows.length > 0, "the roster is not empty");
   assert.ok(!all(tree).some(n => n.children?.includes("已归档的")), "the archived chat is hidden");
   assert.ok(!rowTitles(recentSection(tree)).includes("已归档的"), "and it cannot reach the recent list either");
@@ -135,13 +137,12 @@ test("turning the setting on lists archived chats, marked as such", async t => {
   const recent = rowTitles(recentSection(tree));
   assert.ok(recent.includes("已归档的"), "the archived chat is listed again");
   assert.equal(recent[0], "已归档的", "newest first, so it leads the recent list");
-  const row = all(tree).find(n => n.props?.className?.includes("archived"));
-  assert.ok(row, "the row carries the archived class");
-  assert.match(row.props.title, /已归档$/, "and says so on hover");
+  const row = all(tree).find(n => /(^| )archived( |$)/.test(String(n.props?.className)));
+  assert.ok(row, "the card carries the archived class");
   const tag = all(row).find(n => n.props?.className === "fz-archived-tag");
   assert.ok(tag, "and carries a visible tag, not only a faded row");
   assert.deepEqual(tag.children, ["已归档"], "reading the label in the reader's language");
-  const live = all(tree).filter(n => n.props?.className === "fz-session-title" && n.children[0] === "一分钟前");
+  const live = all(tree).filter(n => (n.props?.className === "fz-session-title" || n.props?.className === "fz-recent-card-title") && n.children[0] === "一分钟前");
   assert.ok(live.length > 0, "a live chat in the same list");
   const tags = all(tree).filter(n => n.props?.className === "fz-archived-tag");
   assert.equal(tags.length, 1, "only the archived chat carries the tag");
@@ -156,4 +157,28 @@ test("the recent list follows the roster filter and the search box", async t => 
   const searched = await mount({ query: "两小时" });
   t.after(searched.stop);
   assert.deepEqual(rowTitles(recentSection(searched.tree)), ["两小时前"], "only matches");
+});
+
+test("recent sessions are large cards: one click loads, and the card says where it lives", async t => {
+  const { tree, stop } = await mount();
+  t.after(stop);
+  const cards = all(tree).filter(n => /^fz-recent-card( |$)/.test(String(n.props?.className)));
+  assert.equal(cards.length, 3, "the three most recent");
+  assert.equal(cards[0].type, "button", "a real button, so it is keyboard reachable");
+  assert.equal(typeof cards[0].props.onClick, "function", "and loads the chat on click");
+  const meta = all(cards[0]).find(n => n.props?.className === "fz-recent-card-meta");
+  assert.ok(meta && String(meta.children[0]).includes("alpha"), "the card names its project");
+});
+
+test("the archived switch sits under the search box and writes the same setting", async t => {
+  const { tree, stop } = await mount();
+  t.after(stop);
+  const search = all(tree).find(n => n.props?.className === "fz-search");
+  const archive = all(tree).find(n => n.props?.className === "fz-archive-switch");
+  assert.ok(search && archive, "both are in the rail");
+  // Document order: the switch must come after the search box it sits under.
+  const ordered = all(tree).map(n => n.props?.className).filter(c => c === "fz-search" || c === "fz-archive-switch");
+  assert.deepEqual(ordered, ["fz-search", "fz-archive-switch"], "the switch sits under the search box");
+  const box = all(archive).find(n => n.type === "input");
+  assert.equal(box.props.checked, false, "off by default, as the stored setting says");
 });

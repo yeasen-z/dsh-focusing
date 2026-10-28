@@ -276,7 +276,8 @@ const rosterRows = [
   { id: 'b', title: 'Plain live', project: 'p', updatedAt: 2, loaded: true, reviewed: false },
   { id: 'c', title: 'Old stored', project: 'p', updatedAt: 1, loaded: false, reviewed: true, reviewCount: 1 },
 ];
-const sessionButtons = nodes => nodes.filter(n => n.type === 'button' && String(n.props?.className || '').startsWith('fz-session'));
+// A session choice is either a row or a recent card; both are one click to load.
+const sessionButtons = nodes => nodes.filter(n => n.type === 'button' && /^fz-(session|recent-card)( |$)/.test(String(n.props?.className || '')));
 
 test('roster filter shows all sessions or only those with saved analyses', () => {
   const all = renderState({ sessions: rosterRows });
