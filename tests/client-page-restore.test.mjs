@@ -174,7 +174,7 @@ test("the focus panel keeps its session, tab, search and roster filter", () => {
   let app = mount(store);
   const page = JSON.parse(JSON.stringify({
     view: "focus", picked: "s-3", rosterTab: "reviews", rosterQuery: "后端", rosterFilter: "reviewed",
-    collapsed: { app: true },
+    expandedGroups: { app: true },
   }));
   store.setItem("dsh-focusing.page", JSON.stringify(page));
   // the panel reads the same memory the workbench wrote, so a remount sees it
@@ -184,7 +184,7 @@ test("the focus panel keeps its session, tab, search and roster filter", () => {
   assert.equal(saved.rosterTab, "reviews", "the panel tab is kept");
   assert.equal(saved.rosterQuery, "后端", "the roster search is kept");
   assert.equal(saved.rosterFilter, "reviewed", "the roster filter is kept");
-  assert.deepEqual(saved.collapsed, { app: true }, "collapsed groups are kept");
+  assert.deepEqual(saved.expandedGroups, { app: true }, "opened folders are kept");
   app.restore();
 });
 
@@ -192,7 +192,7 @@ test("stored values are validated, not trusted", () => {
   const store = session();
   store.setItem("dsh-focusing.page", JSON.stringify({
     view: "records", recRange: 42, recQuery: { nope: 1 }, expanded: [],
-    rosterFilter: "everything", collapsed: ["not", "an", "object"], picked: "",
+    rosterFilter: "everything", expandedGroups: ["not", "an", "object"], picked: "",
   }));
   const app = mount(store);
   app.render([]);
@@ -202,7 +202,7 @@ test("stored values are validated, not trusted", () => {
   assert.equal(saved.recQuery, "", "a non-string search falls back");
   assert.equal(saved.expanded, null, "a non-string expanded id falls back");
   assert.equal(saved.rosterFilter, "all", "an unknown filter falls back");
-  assert.deepEqual(saved.collapsed, {}, "a non-object collapse map falls back");
+  assert.deepEqual(saved.expandedGroups, {}, "a non-object folder map falls back");
   assert.equal(saved.picked, null, "an empty id is not kept");
   app.restore();
 });
