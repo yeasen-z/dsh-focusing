@@ -205,3 +205,31 @@ test("refresh takes a new order from the current contents", async t => {
   refresh.props.onClick();
   assert.deepEqual(rowTitles(recentSection(tick())), ["三小时前", "一分钟前", "两小时前"], "refresh re-sorts");
 });
+
+test("the session list is a drawer: closed by default, opened from the topbar", async t => {
+  const { tree, tick, stop } = await mount();
+  t.after(stop);
+  const rail = () => all(tick()).find(n => n.type === "aside");
+  assert.ok(!/(^| )open( |$)/.test(String(rail().props.className)), "closed at first, so the content has the width");
+  const button = all(tick()).find(n => n.props?.className === "fz-drawer-btn");
+  assert.ok(button, "a topbar button opens it");
+  assert.equal(button.props["aria-expanded"], false);
+  button.props.onClick();
+  assert.ok(/(^| )open( |$)/.test(String(rail().props.className)), "the button opens the drawer");
+  assert.equal(all(tick()).find(n => n.props?.className === "fz-drawer-btn").props["aria-expanded"], true);
+});
+
+test("choosing a chat closes the drawer; the scrim closes it without choosing", async t => {
+  const { tree, tick, stop } = await mount();
+  t.after(stop);
+  const open = () => { all(tick()).find(n => n.props?.className === "fz-drawer-btn").props.onClick(); };
+  const isOpen = () => /(^| )open( |$)/.test(String(all(tick()).find(n => n.type === "aside").props.className));
+  open();
+  assert.ok(isOpen());
+  all(tick()).find(n => /^fz-scrim( |$)/.test(String(n.props?.className))).props.onClick();
+  assert.ok(!isOpen(), "the scrim dismisses it");
+  open();
+  const card = all(tick()).find(n => /^fz-recent-card( |$)/.test(String(n.props?.className)));
+  card.props.onClick();
+  assert.ok(!isOpen(), "choosing a chat closes it, since the content now shows that chat");
+});
