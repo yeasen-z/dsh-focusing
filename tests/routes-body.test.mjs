@@ -2,9 +2,13 @@
 // streaming Request with a body, which throws for GET and surfaces as an empty
 // HTTP 400 from the webserver. That is exactly how the context-records module
 // broke, so every registered route must declare its body mode.
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { apply } from "../lib/index.mjs";
+process.env.DSH_FOCUSING_CODEX_HOME = mkdtempSync(join(tmpdir(), "focusing-codex-empty-"));
 
 function mount() {
   const routes = new Map();

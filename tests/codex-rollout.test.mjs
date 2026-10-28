@@ -59,3 +59,51 @@ test("an empty or header-only rollout yields no events", () => {
   assert.deepEqual(parseRollout("").events, []);
   assert.equal(parseRollout(line("session_meta", { id: "x", cwd: "/a" })).events.length, 0);
 });
+
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createCodexRoster } from "../lib/codex-rollout.mjs";
+
+// A fake ~/.codex with one live rollout and one archived one.
+function fakeCodexHome() {
+  const home = mkdtempSync(join(tmpdir(), "focusing-codex-fixture-"));
+  const day = join(home, "sessions", "2026", "10", "16");
+  mkdirSync(day, { recursive: true });
+  mkdirSync(join(home, "archived_sessions"), { recursive: true });
+  writeFileSync(join(day, "rollout-2026-10-16T13-52-53-aaa.jsonl"), rollout.replace("01a14345", "aaa"));
+  writeFileSync(join(home, "archived_sessions", "rollout-2026-10-01T00-00-00-bbb.jsonl"), rollout.replace("01a14345", "bbb"));
+  writeFileSync(join(home, "session_index.jsonl"), JSON.stringify({ id: "aaa", thread_name: "命名的会话" }) + "\n");
+  return home;
+}
+
+test("the roster lists Codex chats as read-only rows, tagged with their source", () => {
+  const home = fakeCodexHome();
+  try {
+    const rows = createCodexRoster(home).rows();
+    assert.equal(rows.length, 2);
+    for (const row of rows) {
+      assert.equal(row.source, "codex", "every row says where it came from");
+      assert.match(row.id, /^codex:/, "its id cannot collide with a DSH id");
+    }
+    const named = rows.find(r => r.sourceId === "aaa");
+    assert.equal(named.title, "命名的会话", "Codex's own thread name wins");
+    assert.equal(named.project, "paper");
+    assert.equal(rows.find(r => r.sourceId === "bbb").archived, true, "the archived folder is marked archived");
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("a missing Codex home is an empty roster, not an error", () => {
+  assert.deepEqual(createCodexRoster(join(tmpdir(), "no-such-codex-home-xyz")).rows(), []);
+});
+
+test("an unchanged rollout is not reparsed on the next poll", () => {
+  const home = fakeCodexHome();
+  try {
+    const roster = createCodexRoster(home);
+    const first = roster.rows();
+    const second = roster.rows();
+    assert.deepEqual(second.map(r => r.id), first.map(r => r.id));
+    assert.equal(second[0].turns, first[0].turns);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

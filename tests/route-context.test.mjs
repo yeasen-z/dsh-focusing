@@ -13,6 +13,7 @@ import { apply } from "../lib/index.mjs";
 import { mkdtempSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+process.env.DSH_FOCUSING_CODEX_HOME = mkdtempSync(join(tmpdir(), "focusing-codex-empty-"));
 
 // Route tests must never load or overwrite the person's real profile settings.
 // Each plugin instance gets an empty, separately owned temporary directory.

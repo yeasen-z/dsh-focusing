@@ -2,6 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createPanelMetadata, foldPanelEvent, sessionMetadata, projectName, createPanelDataCache } from "../lib/panel-data.mjs";
 import { apply } from "../lib/index.mjs";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+process.env.DSH_FOCUSING_CODEX_HOME = mkdtempSync(join(tmpdir(), "focusing-codex-empty-"));
 
 const text = value => [{ type: "text", text: value }];
 const event = (type, data, time = 100) => ({ type, data, time });

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "../lib/index.mjs";
 import { modelsUrl, chooseKey, fetchExternalModels, pickStoredRows, storedRow, foldStored, createStoredRoster } from "../lib/roster.mjs";
+process.env.DSH_FOCUSING_CODEX_HOME = mkdtempSync(join(tmpdir(), "focusing-codex-empty-"));
 
 const owned = [];
 after(() => {

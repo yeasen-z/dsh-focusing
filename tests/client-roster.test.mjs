@@ -18,12 +18,12 @@ function sessions() {
   ];
 }
 
-async function mount({ filter = "all", query = "", loadArchived = false } = {}) {
+async function mount({ filter = "all", query = "", loadArchived = false, extra = [] } = {}) {
   let captured;
   const effects = [];
   const saved = { window: globalThis.window };
   globalThis.window = { __ModuleLoader__: { load: d => { captured = d; } } };
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: true, status: "done", sessions: sessions(), digest: { status: "done" }, analysis: { loadArchived } }) });
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: true, status: "done", sessions: [...sessions(), ...extra], digest: { status: "done" }, analysis: { loadArchived } }) });
   new Function(SOURCE)();
 
   let states = [], index = 0;
@@ -241,4 +241,36 @@ test("the analysis page has no settings button in its top-right; settings stay i
   assert.equal(top.length, 1, "the top-right action group still exists");
   const labels = all(top[0]).filter(n => n.type === "button").map(n => n.props?.className);
   assert.ok(!labels.includes("fz-save-btn"), "the analysis settings button is gone");
+});
+
+const codexRow = { id: "codex:aaa", source: "codex", sourceId: "aaa", title: "来自 Codex 的会话", project: "paper", cwd: "/p", updatedAt: NOW - 5 * 60e3, status: "idle", loaded: true, archived: false, reviewed: false, reviewCount: 0 };
+
+test("Codex chats sit in their own section, apart from the DSH folders", async t => {
+  const { tree, tick, stop, state } = await mount({ extra: [codexRow] });
+  t.after(stop);
+  const section = all(tree).find(n => n.props?.className === "fz-source-section");
+  assert.ok(section, "a separate Codex section");
+  // Folders start collapsed; the user opens the Codex folder, then its chat shows.
+  all(section).find(n => n.props?.className === "fz-group-head").props.onClick();
+  const opened = all(tick()).find(n => n.props?.className === "fz-source-section");
+  assert.ok(all(opened).some(n => n.children?.includes("来自 Codex 的会话")), "its chat is listed there once the folder opens");
+  // The DSH folders hold none of the Codex chats.
+  const dshFolders = all(tree).filter(n => n.props?.className === "fz-group");
+  assert.ok(!dshFolders.some(f => all(f).some(n => n.children?.includes("来自 Codex 的会话"))), "not mixed into the DSH folders");
+});
+
+test("the pinned recent list shows DSH chats only", async t => {
+  const { tree, stop } = await mount({ extra: [codexRow] });
+  t.after(stop);
+  const recentCards = all(tree).filter(n => /^fz-recent-card( |$)/.test(String(n.props?.className)));
+  assert.ok(!recentCards.some(c => all(c).some(n => n.children?.includes("来自 Codex 的会话"))), "no Codex chat is pinned");
+});
+
+test("a Codex chat is read-only: its tooltip says so", async t => {
+  const { tree, tick, stop } = await mount({ extra: [codexRow] });
+  t.after(stop);
+  all(all(tree).find(n => n.props?.className === "fz-source-section")).find(n => n.props?.className === "fz-group-head").props.onClick();
+  const row = all(all(tick()).find(n => n.props?.className === "fz-source-section")).find(n => /(^| )fz-session( |$)/.test(String(n.props?.className)) && all(n).some(c => c.children?.includes("来自 Codex 的会话")));
+  assert.ok(row, "the Codex row renders");
+  assert.match(row.props.title, /只读/, "its hover text says it is read-only");
 });

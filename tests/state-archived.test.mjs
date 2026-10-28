@@ -1,9 +1,13 @@
 // Archived chats keep their Workspace slot, so the session store still lists
 // them. The registry's archive set is what marks them, and the panel decides
 // whether to show them -- so the state route must carry the mark.
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { apply } from "../lib/index.mjs";
+process.env.DSH_FOCUSING_CODEX_HOME = mkdtempSync(join(tmpdir(), "focusing-codex-empty-"));
 
 const STATE = "/api/dsh-focusing.state";
 
