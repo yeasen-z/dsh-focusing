@@ -53,7 +53,7 @@ const deep = n => typeof n === "string" ? n : Array.isArray(n) ? n.map(deep).joi
 const catalog = [{ provider: "deepseek", id: "chat", name: "DeepSeek Chat", providerName: "DeepSeek" }];
 const settings = {
   source: "dsh", provider: "", model: "", persona: "You are a careful reviewer.", includeGoal: true, includeProject: true,
-  includeToolArgs: true, includeToolOutput: true, maxActivities: 60, excerptChars: 400, maxTokens: 1024, timeoutMs: 60000, hasApiKey: false,
+  includeToolArgs: true, includeToolOutput: true, loadArchived: false, maxActivities: 60, excerptChars: 400, maxTokens: 1024, timeoutMs: 60000, hasApiKey: false,
 };
 // States: localeTick, tab, saved, form, note, busy, test, models, providerInfo, extModels, preview, previewError.
 const set = (extra = {}) => [0, extra.tab || "model", extra.saved === undefined ? settings : extra.saved, extra.form ?? null, extra.note || "", extra.busy || "", extra.test ?? null, extra.models === undefined ? catalog : extra.models, extra.providerInfo ?? [{ provider: "deepseek-account", name: "DeepSeek Account", models: [] }], extra.extModels ?? null, extra.preview ?? null, extra.previewError || ""];
@@ -137,7 +137,14 @@ test("the focus-guard prompt and content switches share the same dialog", () => 
   assert.ok(text(tree).includes(dict.settingsTabFocus), "a second tab holds the focus-guard content");
   const textarea = find(tree, n => n.type === "textarea")[0];
   assert.equal(textarea.props.value, "You are a careful reviewer.", "the persona is editable here");
-  assert.equal(find(tree, n => n.props?.type === "checkbox").length, 4, "four content switches");
+  assert.equal(find(tree, n => n.props?.type === "checkbox").length, 5, "five content switches");
+  // The archived-chats switch is the one switch that defaults OFF, so it must
+  // read the stored setting rather than assume the others' default.
+  const switchBox = (label) => find(tree, n => n.type === "label" && text(n).includes(label))[0];
+  assert.ok(switchBox(dict.loadArchived), "the archived-chats switch lives here too");
+  assert.equal(find(switchBox(dict.loadArchived), n => n.props?.type === "checkbox")[0].props.checked, false, "off unless asked for");
+  const on = render(set({ tab: "focus", saved: { ...settings, loadArchived: true } }));
+  assert.equal(find(switchBox(on, dict.loadArchived) ?? find(on, n => n.type === "label" && text(n).includes(dict.loadArchived))[0], n => n.props?.type === "checkbox")[0].props.checked, true, "and on when stored that way");
   const tabs = find(tree, n => n.props?.role === "tab").map(deep);
   assert.deepEqual(tabs, [dict.settingsTabModel, dict.settingsTabFocus]);
 });

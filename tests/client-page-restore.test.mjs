@@ -210,8 +210,8 @@ test("stored values are validated, not trusted", () => {
 test("a remembered session that no longer exists falls back to the first", () => {
   // Covered by the panel's guard; assert the rule is present and ordered after
   // the roster arrives, so a stale id cannot leave the panel empty.
-  const guard = SOURCE.match(/A remembered session can be gone[\s\S]{0,400}?\},\s*\[sessions,\s*picked\]\);/);
+  const guard = SOURCE.match(/A remembered session can be gone[\s\S]{0,600}?\},\s*\[sessions,\s*picked,\s*loadArchived\]\);/);
   assert.ok(guard, "the panel must recover from a session that disappeared");
-  assert.match(guard[0], /sessions\.some\(s=>s\?\.id===picked\)/, "it checks membership in the roster");
-  assert.match(guard[0], /setPicked\(sessions\[0\]\.id\)/, "and falls back to the first session");
+  assert.match(guard[0], /shown\.some\(s=>s\?\.id===picked\)/, "it checks membership in what is visible");
+  assert.match(guard[0], /setPicked\(shown\[0\]\.id\)/, "and falls back to the first visible session");
 });
