@@ -51,8 +51,9 @@ function mount() {
     if (previous === undefined) delete process.env.DSH_PROFILE_DIR; else process.env.DSH_PROFILE_DIR = previous;
   }
   const state = async () => (await routes.get(STATE).fetch(new Request(`http://host${STATE}`))).json();
-  const save = async settings => (await routes.get(SETTINGS).fetch(new Request(`http://host${SETTINGS}`, { method: "POST", body: JSON.stringify({ settings }) }))).json();
-  return { state, save };
+  const post = async body => (await routes.get(SETTINGS).fetch(new Request(`http://host${SETTINGS}`, { method: "POST", body: JSON.stringify(body) }))).json();
+  const save = settings => post({ settings });
+  return { state, save, post };
 }
 
 test("off by default: no Codex rows, and the status says so", async () => {
@@ -101,4 +102,17 @@ test("the status never carries the rows themselves", async () => {
   const { save } = mount();
   const saved = await save({ codexEnabled: true, codexPathMode: "auto" });
   assert.equal("rows" in saved.codexStatus, false);
+});
+
+test("a failed connection test reverts the connection, not the other settings saved with it", async () => {
+  process.env.CODEX_HOME = codexHome("revert", ["r1"]);
+  const { post, state } = mount();
+  // The dialog's tabs share one form: the Codex switch is saved together with
+  // an external endpoint that has no URL, and the connection test fails.
+  const saved = await post({ settings: { codexEnabled: true, loadArchived: true, source: "external", endpoint: "", externalModel: "m" }, test: true });
+  assert.equal(saved.reverted, true, "the broken connection is rolled back");
+  assert.equal(saved.settings.source, "dsh", "the connection is back to what it was");
+  assert.equal(saved.settings.codexEnabled, true, "but the Codex switch ticked in the same form stays");
+  assert.equal(saved.settings.loadArchived, true, "and so does the archived switch");
+  assert.equal((await state()).sessions.filter(s => s.source === "codex").length, 1, "and the chats load");
 });

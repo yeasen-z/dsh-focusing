@@ -40,13 +40,14 @@ test("turns and tool calls pair up in the DSH event shapes the fold reads", () =
   const { events } = parseRollout(rollout);
   assert.equal(events.filter(e => e.type === "turn/start").length, 2);
   assert.equal(events.filter(e => e.type === "turn/end").length, 2, "a completed and an aborted turn both end");
+  assert.deepEqual(events.filter(e => e.type === "turn/end").map(e => e.data.reason.kind), ["completed", "aborted"], "the reason is read as { kind }");
   const call = events.find(e => e.type === "tool/call");
   assert.equal(call.data.callId, "c1");
   assert.equal(call.data.name, "exec");
   assert.equal(call.data.turn, 1, "the call belongs to the turn it ran in");
   const result = events.find(e => e.type === "tool/result");
   assert.equal(result.data.message.toolCallId, "c1", "the result links back to its call");
-  assert.match(result.data.message.output, /a\.pdf/);
+  assert.match(result.data.message.content[0].text, /a\.pdf/, "output is a text block, as in a DSH tool result");
 });
 
 test("a malformed line is skipped, not fatal", () => {
@@ -106,4 +107,17 @@ test("an unchanged rollout is not reparsed on the next poll", () => {
     assert.deepEqual(second.map(r => r.id), first.map(r => r.id));
     assert.equal(second[0].turns, first[0].turns);
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("the reader's events fold into the same records DSH sessions produce", async () => {
+  const { foldRecord, isPersonal } = await import("../lib/context-records.mjs");
+  const withReply = rollout.replace(line("event_msg", { type: "task_complete", turn_id: "t1" }),
+    line("response_item", { type: "message", role: "assistant", content: [{ type: "output_text", text: "整理好了" }] }) + "\n" + line("event_msg", { type: "task_complete", turn_id: "t1" }));
+  const { header, events } = parseRollout(withReply);
+  const record = foldRecord(events, header);
+  assert.equal(record.turns.length, 2);
+  assert.equal(record.turns[0].calls, 1, "the tool call counts against its turn");
+  assert.equal(record.turns[0].reply, "整理好了", "the assistant's reply is kept");
+  assert.equal(record.turns[0].requests[0].text, "帮我整理这篇论文");
+  assert.equal(isPersonal(record), true, "a chat the person typed in counts as theirs");
 });
