@@ -13,8 +13,9 @@ function load() {
   globalThis.window = { __ModuleLoader__: { load: d => { captured = d; } } };
   globalThis.fetch ??= async () => ({ ok: true, json: async () => ({}) });
   const listeners = [];
+  const scrim = { classList: { _on: null, toggle(_c, on) { this._on = on; } }, focus() {}, querySelectorAll: () => [] };
   globalThis.document = {
-    __listeners: listeners,
+    __listeners: listeners, scrim,
     addEventListener: (type, fn) => listeners.push({ type, fn }),
     removeEventListener: (type, fn) => { const i = listeners.findIndex(l => l.fn === fn); if (i >= 0) listeners.splice(i, 1); },
     body: { appendChild() {} }, createElement: () => ({ click() {}, remove() {} }),
@@ -26,7 +27,7 @@ function load() {
     createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
     Fragment: "Fragment",
     useEffect: fn => { fn(); },
-    useRef: v => ({ current: v }),
+    useRef: v => ({ current: v ?? globalThis.document.scrim }),
     useCallback: f => f,
     useState: init => { const i = index++; if (!(i in states)) states[i] = init; return [states[i], next => { states[i] = typeof next === "function" ? next(states[i]) : next; }]; },
   };
@@ -179,4 +180,19 @@ test("a silent provider is named, not just an empty dropdown", () => {
   assert.ok(all.includes("DeepSeek Account"), "every provider is listed");
   assert.ok(all.includes(dict.providerNoModels), "silence without an error is explained");
   assert.ok(all.includes("RouterLink") && all.includes("ACCOUNT_SIGN_IN_REQUIRED"), "a provider error is shown verbatim");
+});
+
+test("a pointer click leaves the field unpainted; only the keyboard marks it", () => {
+  const { render } = load();
+  render(set());
+  const keydown = globalThis.document.__listeners.find(l => l.type === "keydown");
+  const pointerdown = globalThis.document.__listeners.find(l => l.type === "pointerdown");
+  assert.ok(keydown && pointerdown, "the dialog tracks both input methods");
+  const scrim = globalThis.document.scrim;
+  // Pressing Tab opts into focus rings.
+  keydown.fn({ key: "Tab", stopPropagation() {} });
+  assert.equal(scrim.classList._on, true, "keyboard use shows focus rings");
+  // Any pointer press opts back out, so clicking a field changes nothing.
+  pointerdown.fn({});
+  assert.equal(scrim.classList._on, false, "a click must not paint the field");
 });
