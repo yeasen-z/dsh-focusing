@@ -103,7 +103,8 @@ test("an open digest is restored with its subject", () => {
   app = mount(store);
   app.render([]);
   const saved = JSON.parse(store._store.get("dsh-focusing.page"));
-  assert.deepEqual(saved, { view: "result", digestId: "digest-42", roomId: null }, "the digest id is kept");
+  assert.equal(saved.view, "result");
+  assert.equal(saved.digestId, "digest-42", "the digest id is kept");
   app.restore();
 });
 
@@ -147,4 +148,70 @@ test("a missing sessionStorage does not break the page", () => {
   const { tree, dict } = app.render([]);
   assert.ok(JSON.stringify(tree).includes(dict.wb_home) || JSON.stringify(tree).length > 0, "still renders");
   app.restore();
+});
+
+test("filters and the expanded record survive a remount", () => {
+  const store = session();
+  let app = mount(store);
+  // records page with a search, a range, a project and one expanded row
+  app.render([0, "records", null, null, "", [], "", "", null, "", false, "", "last-30d", "登录", "app",
+    null, "", "rec-9"]);
+  app.restore();
+
+  app = mount(store);
+  app.render([]);
+  const saved = JSON.parse(store._store.get("dsh-focusing.page"));
+  assert.equal(saved.view, "records");
+  assert.equal(saved.recRange, "last-30d", "the time range is kept");
+  assert.equal(saved.recQuery, "登录", "the search text is kept");
+  assert.equal(saved.recProject, "app", "the project filter is kept");
+  assert.equal(saved.expanded, "rec-9", "the expanded record is kept");
+  app.restore();
+});
+
+test("the focus panel keeps its session, tab, search and roster filter", () => {
+  const store = session();
+  let app = mount(store);
+  const page = JSON.parse(JSON.stringify({
+    view: "focus", picked: "s-3", rosterTab: "reviews", rosterQuery: "后端", rosterFilter: "reviewed",
+    collapsed: { app: true },
+  }));
+  store.setItem("dsh-focusing.page", JSON.stringify(page));
+  // the panel reads the same memory the workbench wrote, so a remount sees it
+  app.render([]);
+  const saved = JSON.parse(store._store.get("dsh-focusing.page"));
+  assert.equal(saved.picked, "s-3", "the analysed session is kept");
+  assert.equal(saved.rosterTab, "reviews", "the panel tab is kept");
+  assert.equal(saved.rosterQuery, "后端", "the roster search is kept");
+  assert.equal(saved.rosterFilter, "reviewed", "the roster filter is kept");
+  assert.deepEqual(saved.collapsed, { app: true }, "collapsed groups are kept");
+  app.restore();
+});
+
+test("stored values are validated, not trusted", () => {
+  const store = session();
+  store.setItem("dsh-focusing.page", JSON.stringify({
+    view: "records", recRange: 42, recQuery: { nope: 1 }, expanded: [],
+    rosterFilter: "everything", collapsed: ["not", "an", "object"], picked: "",
+  }));
+  const app = mount(store);
+  app.render([]);
+  const saved = JSON.parse(store._store.get("dsh-focusing.page"));
+  assert.equal(saved.view, "records", "a valid view still applies");
+  assert.equal(saved.recRange, "this-week", "a non-string range falls back");
+  assert.equal(saved.recQuery, "", "a non-string search falls back");
+  assert.equal(saved.expanded, null, "a non-string expanded id falls back");
+  assert.equal(saved.rosterFilter, "all", "an unknown filter falls back");
+  assert.deepEqual(saved.collapsed, {}, "a non-object collapse map falls back");
+  assert.equal(saved.picked, null, "an empty id is not kept");
+  app.restore();
+});
+
+test("a remembered session that no longer exists falls back to the first", () => {
+  // Covered by the panel's guard; assert the rule is present and ordered after
+  // the roster arrives, so a stale id cannot leave the panel empty.
+  const guard = SOURCE.match(/A remembered session can be gone[\s\S]{0,400}?\},\s*\[sessions,\s*picked\]\);/);
+  assert.ok(guard, "the panel must recover from a session that disappeared");
+  assert.match(guard[0], /sessions\.some\(s=>s\?\.id===picked\)/, "it checks membership in the roster");
+  assert.match(guard[0], /setPicked\(sessions\[0\]\.id\)/, "and falls back to the first session");
 });
