@@ -134,19 +134,28 @@ test("an unchanged form cannot be saved and says so", () => {
 test("the focus-guard prompt and content switches share the same dialog", () => {
   const { render, dict } = load();
   const tree = render(set({ tab: "focus" }));
-  assert.ok(text(tree).includes(dict.settingsTabFocus), "a second tab holds the focus-guard content");
+  assert.ok(text(tree).includes(dict.settingsTabFocus), "a tab holds the focus-guard content");
   const textarea = find(tree, n => n.type === "textarea")[0];
   assert.equal(textarea.props.value, "You are a careful reviewer.", "the persona is editable here");
-  assert.equal(find(tree, n => n.props?.type === "checkbox").length, 5, "five content switches");
-  // The archived-chats switch is the one switch that defaults OFF, so it must
-  // read the stored setting rather than assume the others' default.
-  const switchBox = (label) => find(tree, n => n.type === "label" && text(n).includes(label))[0];
-  assert.ok(switchBox(dict.loadArchived), "the archived-chats switch lives here too");
-  assert.equal(find(switchBox(dict.loadArchived), n => n.props?.type === "checkbox")[0].props.checked, false, "off unless asked for");
-  const on = render(set({ tab: "focus", saved: { ...settings, loadArchived: true } }));
-  assert.equal(find(switchBox(on, dict.loadArchived) ?? find(on, n => n.type === "label" && text(n).includes(dict.loadArchived))[0], n => n.props?.type === "checkbox")[0].props.checked, true, "and on when stored that way");
+  assert.equal(find(tree, n => n.props?.type === "checkbox").length, 4, "four content switches");
   const tabs = find(tree, n => n.props?.role === "tab").map(deep);
-  assert.deepEqual(tabs, [dict.settingsTabModel, dict.settingsTabFocus]);
+  assert.deepEqual(tabs, [dict.settingsTabModel, dict.settingsTabFocus, dict.settingsTabSources]);
+});
+
+test("the sources tab holds the archived switch and the Codex import", () => {
+  const { render, dict } = load();
+  const switchIn = (tree, label) => find(tree, n => n.type === "label" && text(n).includes(label))[0];
+  const box = (tree, label) => find(switchIn(tree, label), n => n.props?.type === "checkbox")[0];
+  const off = render(set({ tab: "sources" }));
+  assert.equal(box(off, dict.loadArchived).props.checked, false, "archived chats off by default");
+  assert.equal(box(off, dict.codexEnable).props.checked, false, "Codex import off by default");
+  assert.ok(!text(off).includes(dict.codexAuto), "location choices appear only once Codex is on");
+  const on = render(set({ tab: "sources", saved: { ...settings, codexEnabled: true, codexPathMode: "auto" } }));
+  assert.ok(text(on).includes(dict.codexAuto) && text(on).includes(dict.codexManual), "discover or enter a path");
+  assert.equal(find(on, n => n.props?.["aria-label"] === dict.codexPath).length, 0, "no path box while discovering");
+  const manual = render(set({ tab: "sources", saved: { ...settings, codexEnabled: true, codexPathMode: "manual", codexPath: "~/x" } }));
+  const input = find(manual, n => n.props?.["aria-label"] === dict.codexPath)[0];
+  assert.equal(input.props.value, "~/x", "a manual path is typed in");
 });
 
 test("the connection test reports success and failure in place", async () => {

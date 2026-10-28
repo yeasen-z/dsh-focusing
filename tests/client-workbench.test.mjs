@@ -130,3 +130,16 @@ test("an open room shows snapshot freshness, messages, speak buttons and the han
   const md = find(tree, n => typeof n.type === "function" && typeof n.props?.text === "string").map(n => n.props.text);
   assert.ok(md.includes("## Goal\n合并") && md.includes("返回 {id,name}"));
 });
+
+test("settings have one entry, and it shows the model and Codex import on its face", () => {
+  const { render, dict } = load();
+  const tree = render([0, "home", null, null, "", [], "", "", { range: { label: "本周" }, stats: { sessions: 1, projects: 1, activeDays: 1 } }]);
+  const openers = find(tree, n => n.type === "button" && n.props?.["aria-haspopup"] === "dialog");
+  assert.equal(openers.length, 1, "exactly one button opens the settings dialog");
+  assert.equal(openers[0].props.className, "fw-status-card");
+  const face = text(openers[0]);
+  assert.ok(face.includes(dict.settingsChipLabel), "the model in force is visible");
+  assert.ok(face.includes(dict.codexChipLabel) && face.includes(dict.codexOff), "and whether Codex chats are imported");
+  const gear = find(tree, n => n.type === "button" && n.props?.className === "fw-nav-item" && n.props?.title === dict.wb_settings);
+  assert.equal(gear.length, 0, "no separate gear button");
+});

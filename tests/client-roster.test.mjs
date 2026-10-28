@@ -164,17 +164,16 @@ test("recent sessions are large cards: one click loads, and the card says where 
   assert.ok(meta && String(meta.children[0]).includes("alpha"), "the card names its project");
 });
 
-test("the archived switch sits under the search box and writes the same setting", async t => {
+test("the drawer states the archived setting instead of duplicating its switch", async t => {
+  // Settings have one home (the dialog). The drawer only says what is in force.
   const { tree, stop } = await mount();
   t.after(stop);
-  const search = all(tree).find(n => n.props?.className === "fz-search");
-  const archive = all(tree).find(n => n.props?.className === "fz-archive-switch");
-  assert.ok(search && archive, "both are in the rail");
-  // Document order: the switch must come after the search box it sits under.
-  const ordered = all(tree).map(n => n.props?.className).filter(c => c === "fz-search" || c === "fz-archive-switch");
-  assert.deepEqual(ordered, ["fz-search", "fz-archive-switch"], "the switch sits under the search box");
-  const box = all(archive).find(n => n.type === "input");
-  assert.equal(box.props.checked, false, "off by default, as the stored setting says");
+  assert.equal(all(tree).filter(n => n.props?.className === "fz-archive-switch").length, 0, "no second switch");
+  const line = all(tree).find(n => n.props?.className === "fz-source-line");
+  assert.ok(line, "a status line sits in the drawer");
+  assert.match(String(line.children[0]), /不含已归档/, "and says archived chats are hidden");
+  const ordered = all(tree).map(n => n.props?.className).filter(c => c === "fz-search" || c === "fz-source-line");
+  assert.deepEqual(ordered, ["fz-search", "fz-source-line"], "right under the search box");
 });
 
 test("a running chat keeps its place while its contents update", async t => {
