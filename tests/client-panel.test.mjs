@@ -87,9 +87,11 @@ function deepText(node) {
 const labelOf = deepText;
 const byLabel = (buttons, dicts, key) => buttons.find(b => labelOf(b) === dicts[key]);
 
-test('the settings entry exists in the top bar before any session is loaded', () => {
+// The analysis page's own settings button was removed; configuring analysis is
+// reached from the workbench's global settings entry, not from this page.
+test('the panel does not carry its own settings button', () => {
   const { buttons, dicts } = renderState({});
-  assert.ok(byLabel(buttons, dicts, 'analysisSettings'), 'no way to configure analysis was offered');
+  assert.equal(byLabel(buttons, dicts, 'analysisSettings'), undefined, 'the page-level button is gone');
 });
 
 

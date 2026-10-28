@@ -233,3 +233,12 @@ test("choosing a chat closes the drawer; the scrim closes it without choosing", 
   card.props.onClick();
   assert.ok(!isOpen(), "choosing a chat closes it, since the content now shows that chat");
 });
+
+test("the analysis page has no settings button in its top-right; settings stay in the global nav", async t => {
+  const { tree, tick, stop } = await mount();
+  t.after(stop);
+  const top = all(tick()).filter(n => n.props?.className === "fz-actions");
+  assert.equal(top.length, 1, "the top-right action group still exists");
+  const labels = all(top[0]).filter(n => n.type === "button").map(n => n.props?.className);
+  assert.ok(!labels.includes("fz-save-btn"), "the analysis settings button is gone");
+});
