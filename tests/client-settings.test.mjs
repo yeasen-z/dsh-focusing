@@ -182,17 +182,25 @@ test("a silent provider is named, not just an empty dropdown", () => {
   assert.ok(all.includes("RouterLink") && all.includes("ACCOUNT_SIGN_IN_REQUIRED"), "a provider error is shown verbatim");
 });
 
-test("a pointer click leaves the field unpainted; only the keyboard marks it", () => {
-  const { render } = load();
-  render(set());
-  const keydown = globalThis.document.__listeners.find(l => l.type === "keydown");
-  const pointerdown = globalThis.document.__listeners.find(l => l.type === "pointerdown");
-  assert.ok(keydown && pointerdown, "the dialog tracks both input methods");
-  const scrim = globalThis.document.scrim;
-  // Pressing Tab opts into focus rings.
-  keydown.fn({ key: "Tab", stopPropagation() {} });
-  assert.equal(scrim.classList._on, true, "keyboard use shows focus rings");
-  // Any pointer press opts back out, so clicking a field changes nothing.
-  pointerdown.fn({});
-  assert.equal(scrim.classList._on, false, "a click must not paint the field");
+test("focusing a field cannot repaint it in any stylesheet", () => {
+  // The three stylesheets (workbench .fw, settings .fws, focus guard .fz) each
+  // used to draw an accent outline on a focused field. A field must look the
+  // same focused and unfocused, everywhere, so every stylesheet carries an
+  // explicit !important opt-out for fields while buttons keep their ring.
+  for (const [name, re] of [
+    ["settings", /\/\* Focus must not repaint a field[\s\S]*?\}/],
+    ["workbench", /\.fw input:focus,[^{]*\{[^}]*\}/],
+    ["focus guard", /\.fz input:focus,[^{]*\{[^}]*\}/],
+  ]) {
+    const block = SOURCE.match(re);
+    assert.ok(block, `${name}: fields must carry a no-repaint focus rule`);
+    assert.match(block[0], /outline:none!important/, `${name}: no outline`);
+    assert.match(block[0], /box-shadow:none!important/, `${name}: no shadow`);
+  }
+  assert.ok(!/fws-kbd/.test(SOURCE), "the keyboard opt-in is gone");
+  for (const [name, re] of [
+    ["settings", /\.fws button:focus-visible,\.fws summary:focus-visible\{outline:2px solid var\(--fws-accent\)/],
+    ["workbench", /\.fw button:focus-visible\{outline:2px solid var\(--blue\)/],
+    ["focus guard", /\.fz button:focus-visible,\.fz summary:focus-visible\{outline:2px solid var\(--blue\)/],
+  ]) assert.match(SOURCE, re, `${name}: buttons keep a visible keyboard ring`);
 });
