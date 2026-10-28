@@ -61,10 +61,13 @@ test("an empty or header-only rollout yields no events", () => {
   assert.equal(parseRollout(line("session_meta", { id: "x", cwd: "/a" })).events.length, 0);
 });
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createCodexRoster } from "../lib/codex-rollout.mjs";
+import { createCodexRoster, createCodexRecords } from "../lib/codex-rollout.mjs";
+import { createCodexIndex } from "../lib/codex-index.mjs";
+import { foldRecord } from "../lib/context-records.mjs";
+const rosterFor = home => createCodexRoster(home, createCodexIndex({ home, fold: foldRecord }));
 
 // A fake ~/.codex with one live rollout and one archived one.
 function fakeCodexHome() {
@@ -81,7 +84,7 @@ function fakeCodexHome() {
 test("the roster lists Codex chats as read-only rows, tagged with their source", () => {
   const home = fakeCodexHome();
   try {
-    const rows = createCodexRoster(home).rows();
+    const rows = rosterFor(home).rows();
     assert.equal(rows.length, 2);
     for (const row of rows) {
       assert.equal(row.source, "codex", "every row says where it came from");
@@ -95,19 +98,56 @@ test("the roster lists Codex chats as read-only rows, tagged with their source",
 });
 
 test("a missing Codex home is an empty roster, not an error", () => {
-  assert.deepEqual(createCodexRoster(join(tmpdir(), "no-such-codex-home-xyz")).rows(), []);
+  assert.deepEqual(rosterFor(join(tmpdir(), "no-such-codex-home-xyz")).rows(), []);
 });
 
-test("an unchanged rollout is not reparsed on the next poll", () => {
+test("an unchanged rollout is not decompressed again, and neither consumer re-reads it", () => {
   const home = fakeCodexHome();
   try {
-    const roster = createCodexRoster(home);
-    const first = roster.rows();
-    const second = roster.rows();
-    assert.deepEqual(second.map(r => r.id), first.map(r => r.id));
-    assert.equal(second[0].turns, first[0].turns);
+    let reads = 0;
+    const index = createCodexIndex({ home, fold: foldRecord });
+    const refresh = index.refresh;
+    // Count how many chats are folded: every fold is a full decompress+parse.
+    const countingFold = (events, header) => { reads += 1; return foldRecord(events, header); };
+    const counted = createCodexIndex({ home, fold: countingFold });
+    const roster = createCodexRoster(home, counted);
+    roster.rows();
+    assert.equal(reads, 2, "the first poll folds each chat once");
+    roster.rows();
+    createCodexRecords(home, counted).records();
+    assert.equal(reads, 2, "the next poll and the calendar both reuse the same summaries");
+    assert.ok(refresh);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test("summaries survive a restart through the saved index file", () => {
+  const home = fakeCodexHome();
+  const cacheFile = join(home, "codex-index.json");
+  try {
+    createCodexRoster(home, createCodexIndex({ home, fold: foldRecord, cacheFile })).rows();
+    let reads = 0;
+    const after = createCodexIndex({ home, fold: (e, h) => { reads += 1; return foldRecord(e, h); }, cacheFile });
+    const rows = createCodexRoster(home, after).rows();
+    assert.equal(rows.length, 2, "the chats are all there after restart");
+    assert.equal(reads, 0, "and nothing was decompressed again");
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("a changed rollout is folded again, and a deleted one leaves the index", () => {
+  const home = fakeCodexHome();
+  try {
+    const index = createCodexIndex({ home, fold: foldRecord });
+    assert.equal(index.refresh().length, 2);
+    const day = join(home, "sessions", "2026", "10", "16");
+    const file = join(day, "rollout-2026-10-16T13-52-53-aaa.jsonl");
+    writeFileSync(file, readFileSync(file, "utf8") + "\n" + JSON.stringify({ timestamp: "2026-10-16T09:00:00.000Z", type: "event_msg", payload: { type: "task_started", turn_id: "t9" } }));
+    const grown = index.refresh().find(c => c.id === "aaa");
+    assert.equal(grown.turns, 3, "the new turn shows up after the file changes");
+    rmSync(join(home, "archived_sessions", "rollout-2026-10-01T00-00-00-bbb.jsonl"));
+    assert.equal(index.refresh().length, 1, "a deleted chat leaves the roster");
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 
 test("the reader's events fold into the same records DSH sessions produce", async () => {
   const { foldRecord, isPersonal } = await import("../lib/context-records.mjs");
