@@ -57,8 +57,8 @@ function renderState({ data = null, sessions = [], picked = null, busy = false, 
   const { React, Panel, dicts } = loadPanel();
   // Hook order: data, sessions, picked, query, tab, error, tick, busy,
   // reviewError, reviewDetail, localeTick, preview, previewError, modelSummary,
-  // collapsed, rosterFilter. (Settings lives in its own dialog now.)
-  const values = [data, sessions, picked, '', 'overview', '', 0, busy, reviewError, reviewDetail, 0, null, '', null, {}, rosterFilter];
+  // expanded, collapsed, rosterFilter. (Settings lives in its own dialog now.)
+  const values = [data, sessions, picked, '', 'overview', '', 0, busy, reviewError, reviewDetail, 0, null, '', null, new Set(), {}, rosterFilter];
   let index = 0;
   React.useState = initial => {
     const slot = index++;

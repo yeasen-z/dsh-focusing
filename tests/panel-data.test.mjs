@@ -91,12 +91,12 @@ test("failed and incomplete outcomes cannot be presented as successful", () => {
   assert.equal(fold(createPanelMetadata("a"), call(), result("c", {}, "[exit code: 0]")).activity[0].status, "success");
 });
 
-test("activity and excerpts are bounded and malformed args remain displayable", () => {
+test("activity and results are kept whole and malformed args remain displayable", () => {
   const state = createPanelMetadata("a");
-  for (let i = 0; i < 100; i++) fold(state, call(String(i)), result(String(i), {}, "X".repeat(3000)));
-  assert.equal(state.activity.length, 60);
-  assert.equal(state.activity[0].id, "40");
-  assert.equal(state.activity.at(-1).resultExcerpt.length, 1200);
+  for (let i = 0; i < 300; i++) fold(state, call(String(i)), result(String(i), {}, "X".repeat(3000)));
+  assert.equal(state.activity.length, 300, "no cap on how many rows are kept");
+  assert.equal(state.activity[0].id, "0");
+  assert.equal(state.activity.at(-1).resultExcerpt.length, 3000, "result text is kept whole; the panel decides what to show");
   fold(state, event("tool/call", { callId: "bad", name: "Tool", arguments: "Bad Case {", turn: 1, step: 2 }));
   assert.equal(state.activity.at(-1).arguments.__unparsed, "Bad Case {");
 });
@@ -110,9 +110,10 @@ test("cache snapshots once then folds only appended tail, independently per sess
   cache.read(a);
   assert.deepEqual(a.reads, [[0, 3]]);
   a.events.push(result());
-  assert.equal(cache.read(a).activity[0].status, "success");
+  assert.equal(cache.read(a).activity.find(x => x.kind !== "message").status, "success");
   assert.deepEqual(a.reads, [[0, 3], [3, 4]]);
-  assert.equal(cache.read(b).activity.length, 0);
+  assert.equal(cache.read(b).activity.filter(x => x.kind !== "message").length, 0, "no tool rows yet");
+  assert.equal(cache.read(b).activity.length, 1, "the user message is a row");
   assert.equal(cache.read(b).project, "OtherProject");
   const replacement = session("a", [human("New session")]);
   assert.equal(cache.read(replacement).fallbackTitle, "New session");
@@ -144,8 +145,8 @@ function routeHarness(sessions, agents = sessions.map(s => ({ id: s.id }))) {
     },
   };
   apply(ctx);
-  const get = async id => (await routes.get("/api/dsh-focusing.state")
-    .fetch(new Request(`http://localhost/api/dsh-focusing.state${id ? `?session=${id}` : ""}`))).json();
+  const get = async (id, known) => (await routes.get("/api/dsh-focusing.state")
+    .fetch(new Request(`http://localhost/api/dsh-focusing.state${id ? `?session=${id}${known ? `&known=${encodeURIComponent(known)}` : ""}` : ""}`))).json();
   const analyze = async id => (await routes.get("/api/dsh-focusing.analyze")
     .fetch(new Request("http://localhost/api/dsh-focusing.analyze", {
       method: "POST",
@@ -166,7 +167,7 @@ test("route returns object roster and refreshes it on selected polls without con
   assert.equal(selected.project, "MyProject");
   assert.equal(selected.toolCalls, 1);
   assert.equal(selected.goal, "Task A");
-  assert.equal(selected.recent[0].cmd, "node MyScript.js --Name=Alice");
+  assert.equal(selected.recent.find(x => x.cmd)?.cmd, "node MyScript.js --Name=Alice");
   assert.deepEqual(selected.diagnostics, []);
   sessions.push(session("b", [human("Task B"), event("turn/start", { turn: 1 })]));
   assert.equal((await get("a")).sessions.length, 2);
@@ -290,4 +291,42 @@ test("analysis works on a finished conversation with no live agent", async () =>
   )).json();
   assert.equal(result.ok, true);
   assert.equal(result.review.stuck, true);
+});
+
+test("user and assistant messages become message rows in order, beside the tool rows", () => {
+  const state = createPanelMetadata("m");
+  fold(state,
+    human("fix it"),
+    event("turn/start", { turn: 1 }),
+    call("c1"),
+    event("assistant/message", { turn: 1, message: { content: [{ type: "text", text: "Done, tests pass." }] } }));
+  assert.deepEqual(state.activity.map(a => a.kind === "message" ? a.role : "tool"), ["user", "tool", "assistant"]);
+  assert.equal(state.activity.at(-1).text, "Done, tests pass.");
+});
+
+test("totalToolCalls counts every tool call in the session, not just this turn's, and not messages", () => {
+  const state = createPanelMetadata("t");
+  fold(state,
+    human("go"), event("turn/start", { turn: 1 }), call("a"), call("b"),
+    event("assistant/message", { turn: 1, message: { content: [{ type: "text", text: "ok" }] } }),
+    event("turn/end", { turn: 1 }),
+    human("more"), event("turn/start", { turn: 2 }), call("c", undefined, 2));
+  assert.equal(state.totalToolCalls, 3);
+  assert.equal(state.toolCalls, 1, "toolCalls stays the current turn's count");
+  assert.equal(state.activity.length, 6, "2 user + 1 assistant + 3 tool rows");
+});
+
+test("an unchanged selection is not resent: the stamp matches and activity is left out", async () => {
+  const a = session("a", [human("Task A"), event("turn/start", { turn: 1 }), call()]);
+  const { get } = routeHarness([a]);
+  const first = await get("a");
+  assert.ok(first.activityStamp && first.activity.length > 0);
+  const again = await get("a", first.activityStamp);
+  assert.equal(again.activityUnchanged, true);
+  assert.equal(again.activity, undefined, "rows are not sent again");
+  assert.equal(again.sessions.length, 1, "the roster still arrives");
+  a.events.push(result());
+  const moved = await get("a", first.activityStamp);
+  assert.equal(moved.activityUnchanged, undefined);
+  assert.ok(moved.activity.length > 0, "a changed session sends its rows");
 });

@@ -57,8 +57,8 @@ async function mount({ filter = "all", query = "", loadArchived = false, extra =
   const stop = () => { while (cleanups.length) cleanups.pop()(); };
   tick();
   await new Promise(r => setTimeout(r, 20));   // the roster arrives asynchronously
-  // the roster filter and search are state 15 / 3; set them before inspecting
-  if (filter !== "all") states[15] = filter;
+  // the roster filter and search are state 16 / 3; set them before inspecting
+  if (filter !== "all") states[16] = filter;
   if (query) states[3] = query;
   const tree = tick();
   if (saved.window === undefined) delete globalThis.window; else globalThis.window = saved.window;
@@ -110,7 +110,7 @@ test("opening a folder shows its rows and keeps the others folded", async t => {
   const alpha = projectSections(tree).find(s => all(s).some(n => n.children?.includes("alpha")));
   const head = all(alpha).find(n => n.props?.className === "fz-group-head");
   head.props.onClick();                    // the user opens "alpha"
-  assert.equal(state[14].alpha, true, "the open folder is remembered");
+  assert.equal(state[15].alpha, true, "the open folder is remembered");
   const after = projectSections(tick()).find(s => all(s).some(n => n.children?.includes("alpha")));
   assert.deepEqual(rowTitles(bodyOf(after)), ["一分钟前", "十小时前"], "its sessions are listed, newest first");
   const beta = projectSections(tick()).find(s => all(s).some(n => n.children?.includes("beta")));

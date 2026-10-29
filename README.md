@@ -185,3 +185,41 @@ node --test tests/*.test.mjs
 node --check lib/index.mjs && node --check lib/client.js
 dsh --profile "$DSH_PROFILE" --dump-config | grep focusing
 ```
+
+### Ask about your history
+
+The home page and the **整理与报告 / Digests** page have a small ask box. A question
+runs a short loop inside the plugin: the Host model may call three read-only
+tools, the plugin runs them, feeds the results back, and stops when the model
+answers. It is not a DSH session and registers no tool, so no other conversation
+can see or call these tools.
+
+Each ask is a **conversation**: a plain message list the plugin keeps itself
+(questions, answers, tool calls and their results). The next question continues
+the open conversation, so follow-ups build on what was already found. **新建对话
+/ New chat** starts another; the drop-down switches between past ones. The list
+is saved next to the digests (`dsh-focusing.digests.json.asks.json`, newest
+activity first, 100 at most) and written before the model is called, so a reload
+or Host restart loses nothing; a turn caught by a restart comes back marked
+interrupted. A running turn keeps going when you leave the page. Stop ends the
+turn and keeps the conversation; Delete removes it. A turn that fails or is
+stopped is cut back to its question, so the thread never holds a tool call
+without a result. Stored text is capped at 20,000 characters per message or tool
+result (the model still saw it whole); a result fed back to the model is clipped
+to 12,000.
+
+- `focus_list_sessions`: discover DSH and enabled Codex conversations across
+  every workspace. Optional `start` / `end` are timezone-qualified ISO timestamps
+  (inclusive start, exclusive end). `sources`, `project`, `cwd` and a literal
+  `query` narrow the results. Query searches folded (shortened) requests and
+  replies, not full text; omit it when discovering broadly.
+- `focus_read_session`: read original events by `sessionId` as exact JSON
+  fragments, grouped by `eventIndex` and ordered by `offset`. Each fragment is at
+  most 2,000 characters; `limit` defaults to 5 and is capped at 10.
+- `focus_activity`: count activity over explicit `start` / `end` (at most 366
+  days). `offsetMinutes` is a fixed UTC offset, not an IANA zone.
+
+Tools accept IDs, never filesystem paths. Codex results appear only when Codex
+import is enabled. Asking needs the Host model (not an external endpoint).
+Chat and tool-output text is untrusted material; the instructions say so.
+

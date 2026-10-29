@@ -45,5 +45,8 @@ test("no layout measurement is used, so a transition cannot leave the rail behin
   // exactly what made the rail wait for a click. Constant padding has no timing.
   assert.ok(!/useTrafficLightInset/.test(SOURCE), "the measuring hook is gone");
   assert.ok(!/traffic-safe/.test(SOURCE), "the toggled class is gone");
-  assert.ok(!/ResizeObserver|MutationObserver/.test(SOURCE), "no observers remain");
+  // No measuring of the rail itself. (The calendar fits its year to the card
+  // with a ResizeObserver; that is a local concern, not the rail's position,
+  // and cannot leave the rail behind during the fullscreen transition.)
+  assert.ok(!/(?:Resize|Mutation)Observer[^;\n]*fw-nav|fw-nav[^;\n]*(?:Resize|Mutation)Observer/.test(SOURCE), "no rail position observers remain");
 });

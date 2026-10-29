@@ -47,7 +47,9 @@ test("turns and tool calls pair up in the DSH event shapes the fold reads", () =
   assert.equal(call.data.turn, 1, "the call belongs to the turn it ran in");
   const result = events.find(e => e.type === "tool/result");
   assert.equal(result.data.message.toolCallId, "c1", "the result links back to its call");
-  assert.match(result.data.message.content[0].text, /a\.pdf/, "output is a text block, as in a DSH tool result");
+  // Tool output text is kept in full: the focus trace reads it to judge what
+  // happened, the same as a DSH session's result.
+  assert.equal(result.data.message.content[0].text, "a.pdf\n", "output text is kept");
 });
 
 test("a malformed line is skipped, not fatal", () => {
@@ -67,7 +69,9 @@ import { join } from "node:path";
 import { createCodexRoster, createCodexRecords } from "../lib/codex-rollout.mjs";
 import { createCodexIndex } from "../lib/codex-index.mjs";
 import { foldRecord } from "../lib/context-records.mjs";
-const rosterFor = home => createCodexRoster(home, createCodexIndex({ home, fold: foldRecord }));
+// The index rebuilds in the background; tests settle it first, then read.
+const settled = async index => { await index.settle(); return index; };
+const rosterFor = async home => createCodexRoster(home, await settled(createCodexIndex({ home, fold: foldRecord })));
 
 // A fake ~/.codex with one live rollout and one archived one.
 function fakeCodexHome() {
@@ -81,10 +85,10 @@ function fakeCodexHome() {
   return home;
 }
 
-test("the roster lists Codex chats as read-only rows, tagged with their source", () => {
+test("the roster lists Codex chats as read-only rows, tagged with their source", async () => {
   const home = fakeCodexHome();
   try {
-    const rows = rosterFor(home).rows();
+    const rows = (await rosterFor(home)).rows();
     assert.equal(rows.length, 2);
     for (const row of rows) {
       assert.equal(row.source, "codex", "every row says where it came from");
@@ -97,11 +101,11 @@ test("the roster lists Codex chats as read-only rows, tagged with their source",
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test("a missing Codex home is an empty roster, not an error", () => {
-  assert.deepEqual(rosterFor(join(tmpdir(), "no-such-codex-home-xyz")).rows(), []);
+test("a missing Codex home is an empty roster, not an error", async () => {
+  assert.deepEqual((await rosterFor(join(tmpdir(), "no-such-codex-home-xyz"))).rows(), []);
 });
 
-test("an unchanged rollout is not decompressed again, and neither consumer re-reads it", () => {
+test("an unchanged rollout is not decompressed again, and neither consumer re-reads it", async () => {
   const home = fakeCodexHome();
   try {
     let reads = 0;
@@ -110,9 +114,11 @@ test("an unchanged rollout is not decompressed again, and neither consumer re-re
     // Count how many chats are folded: every fold is a full decompress+parse.
     const countingFold = (events, header) => { reads += 1; return foldRecord(events, header); };
     const counted = createCodexIndex({ home, fold: countingFold });
+    await counted.settle();
     const roster = createCodexRoster(home, counted);
     roster.rows();
-    assert.equal(reads, 2, "the first poll folds each chat once");
+    assert.equal(reads, 2, "the first rebuild folds each chat once");
+    await counted.settle();
     roster.rows();
     createCodexRecords(home, counted).records();
     assert.equal(reads, 2, "the next poll and the calendar both reuse the same summaries");
@@ -120,11 +126,11 @@ test("an unchanged rollout is not decompressed again, and neither consumer re-re
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test("summaries survive a restart through the saved index file", () => {
+test("summaries survive a restart through the saved index file", async () => {
   const home = fakeCodexHome();
   const cacheFile = join(home, "codex-index.json");
   try {
-    createCodexRoster(home, createCodexIndex({ home, fold: foldRecord, cacheFile })).rows();
+    await createCodexIndex({ home, fold: foldRecord, cacheFile }).settle();
     let reads = 0;
     const after = createCodexIndex({ home, fold: (e, h) => { reads += 1; return foldRecord(e, h); }, cacheFile });
     const rows = createCodexRoster(home, after).rows();
@@ -133,17 +139,20 @@ test("summaries survive a restart through the saved index file", () => {
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test("a changed rollout is folded again, and a deleted one leaves the index", () => {
+test("a changed rollout is folded again, and a deleted one leaves the index", async () => {
   const home = fakeCodexHome();
   try {
     const index = createCodexIndex({ home, fold: foldRecord });
+    await index.settle();
     assert.equal(index.refresh().length, 2);
     const day = join(home, "sessions", "2026", "10", "16");
     const file = join(day, "rollout-2026-10-16T13-52-53-aaa.jsonl");
     writeFileSync(file, readFileSync(file, "utf8") + "\n" + JSON.stringify({ timestamp: "2026-10-16T09:00:00.000Z", type: "event_msg", payload: { type: "task_started", turn_id: "t9" } }));
+    await index.settle();
     const grown = index.refresh().find(c => c.id === "aaa");
     assert.equal(grown.turns, 3, "the new turn shows up after the file changes");
     rmSync(join(home, "archived_sessions", "rollout-2026-10-01T00-00-00-bbb.jsonl"));
+    await index.settle();
     assert.equal(index.refresh().length, 1, "a deleted chat leaves the roster");
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
@@ -160,4 +169,40 @@ test("the reader's events fold into the same records DSH sessions produce", asyn
   assert.equal(record.turns[0].reply, "整理好了", "the assistant's reply is kept");
   assert.equal(record.turns[0].requests[0].text, "帮我整理这篇论文");
   assert.equal(isPersonal(record), true, "a chat the person typed in counts as theirs");
+});
+
+test("a function tool call and its failing output are both counted", async () => {
+  const { foldRecord } = await import("../lib/context-records.mjs");
+  const text = [
+    line("session_meta", { id: "fn-1", cwd: "/tmp/x" }),
+    line("event_msg", { type: "task_started", turn_id: "t1" }),
+    line("response_item", { type: "message", role: "user", content: [{ type: "input_text", text: "列出文件" }] }),
+    line("response_item", { type: "function_call", name: "shell", call_id: "call_A", arguments: "{\"command\":\"ls /nope\"}" }),
+    line("response_item", { type: "function_call_output", call_id: "call_A", output: "ls: /nope: No such file\nProcess exited with code 2" }),
+    line("response_item", { type: "function_call", name: "shell", call_id: "call_B", arguments: "{\"command\":\"ls\"}" }),
+    line("response_item", { type: "function_call_output", call_id: "call_B", output: "Process exited with code 0" }),
+    line("event_msg", { type: "task_complete", turn_id: "t1" }),
+  ].join("\n");
+  const { header, events } = parseRollout(text);
+  assert.equal(events.filter(e => e.type === "tool/call").length, 2, "both function calls are recorded");
+  assert.equal(events.find(e => e.type === "tool/call" && e.data.callId === "call_A").data.arguments, "{\"command\":\"ls /nope\"}", "the arguments are kept");
+  const record = foldRecord(events, header);
+  assert.equal(record.turns[0].calls, 2);
+  assert.equal(record.turns[0].failed, 1, "exit code 2 is a failure; exit code 0 is not");
+});
+
+test("a failure is recognised from Codex's wording, with 0 meaning success", async () => {
+  const { foldRecord } = await import("../lib/context-records.mjs");
+  const mk = out => [
+    line("session_meta", { id: "w", cwd: "/tmp" }),
+    line("event_msg", { type: "task_started", turn_id: "t" }),
+    line("response_item", { type: "custom_tool_call", name: "exec", call_id: "c", input: "x" }),
+    line("response_item", { type: "custom_tool_call_output", call_id: "c", output: out }),
+    line("event_msg", { type: "task_complete", turn_id: "t" }),
+  ].join("\n");
+  const failed = out => foldRecord(parseRollout(mk(out)).events, parseRollout(mk(out)).header).turns[0].failed ?? 0;
+  assert.equal(failed("Process exited with code 1"), 1);
+  assert.equal(failed("Process exited with code 10"), 1);
+  assert.equal(failed("Process exited with code 0"), 0);
+  assert.equal(failed("[exit code: 3]"), 1, "DSH's own wording still works");
 });

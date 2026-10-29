@@ -13,7 +13,13 @@ delete process.env.DSH_FOCUSING_CODEX_HOME;
 const STATE = "/api/dsh-focusing.state";
 const SETTINGS = "/api/dsh-focusing.settings";
 const root = mkdtempSync(join(tmpdir(), "focusing-codex-source-"));
-after(() => rmSync(root, { recursive: true, force: true }));
+// A mount's background read may still be writing its cache when a test ends.
+// Let every such read finish before the temporary folder is removed.
+const pendingReads = [];
+after(async () => {
+  await Promise.allSettled(pendingReads.map(f => Promise.resolve().then(f)));
+  rmSync(root, { recursive: true, force: true });
+});
 
 function codexHome(name, ids) {
   const home = join(root, name);
@@ -47,10 +53,23 @@ function mount() {
   const ctx = { get: () => undefined, on: () => {}, inject: (keys, cb) => cb(child), logger: { info: () => {}, warn: () => {} } };
   const previous = process.env.DSH_PROFILE_DIR;
   process.env.DSH_PROFILE_DIR = mkdtempSync(join(root, "profile-"));
-  try { apply(ctx); } finally {
+  let handle;
+  try { handle = apply(ctx); } finally {
     if (previous === undefined) delete process.env.DSH_PROFILE_DIR; else process.env.DSH_PROFILE_DIR = previous;
   }
-  const state = async () => (await routes.get(STATE).fetch(new Request(`http://host${STATE}`))).json();
+  // Read at cleanup time, when the rebuild has had the whole test to run.
+  pendingReads.push(() => handle?.codexIdle?.());
+  const readState = async () => (await routes.get(STATE).fetch(new Request(`http://host${STATE}`))).json();
+  // The first read starts the background rebuild and may see none of the chats
+  // yet. Like the page's next poll, wait until nothing is pending, then read.
+  const state = async () => {
+    let body = await readState();
+    for (let i = 0; i < 100 && (body.codexStatus?.pending ?? 0) > 0; i += 1) {
+      await new Promise(r => setTimeout(r, 50));
+      body = await readState();
+    }
+    return body;
+  };
   const post = async body => (await routes.get(SETTINGS).fetch(new Request(`http://host${SETTINGS}`, { method: "POST", body: JSON.stringify(body) }))).json();
   const save = settings => post({ settings });
   return { state, save, post };
@@ -69,9 +88,15 @@ test("discovery finds CODEX_HOME and lists its chats", async () => {
   const { state, save } = mount();
   const saved = await save({ codexEnabled: true });
   assert.equal(saved.codexStatus.ok, true, "saving reports what was found at once");
-  assert.equal(saved.codexStatus.sessions, 2);
   assert.equal(saved.codexStatus.via, "env");
-  const body = await state();
+  // The count may still be 0 here: saving does not wait for the summaries.
+  // The chats appear as their summaries are built; nothing waits on that. Poll
+  // like the page does until both are listed.
+  let body = await state();
+  for (let i = 0; i < 100 && body.sessions.filter(s => s.source === "codex").length < 2; i += 1) {
+    await new Promise(r => setTimeout(r, 50));
+    body = await state();
+  }
   assert.deepEqual(body.sessions.filter(s => s.source === "codex").map(s => s.sourceId).sort(), ["d1", "d2"]);
   assert.equal(body.codexStatus.path, process.env.CODEX_HOME);
 });

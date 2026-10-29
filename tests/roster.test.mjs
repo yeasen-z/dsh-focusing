@@ -119,8 +119,9 @@ test("an unloaded session can be opened, analyzed, and is then flagged as review
   assert.equal(detail.live, false);
   assert.equal(detail.loaded, false);
   assert.equal(detail.goal, "fix the old bug");
-  assert.equal(detail.activity.length, 1);
-  assert.equal(detail.activity[0].status, "success");
+  assert.equal(detail.activity.filter(x => x.kind !== "message").length, 1, "one tool row");
+  assert.equal(detail.activity.find(x => x.kind !== "message").status, "success");
+  assert.equal(detail.activity.some(x => x.kind === "message" && x.role === "user"), true, "the user message is also a row");
 
   const result = await h.analyze("old1");
   assert.equal(result.ok, true, JSON.stringify(result));

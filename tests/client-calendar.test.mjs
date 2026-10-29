@@ -49,9 +49,24 @@ test("the calendar is on the home page, between the hero and the capability card
   assert.ok(order[0] > 0 && order[0] < order[1] && order[1] < order[2], "hero, then activity, then capabilities");
 });
 
+test("the year fits the card: no horizontal bar, and columns are sized to the width", () => {
+  // The grid once scrolled sideways. Fit-to-width is a sheet rule plus the
+  // measured --calw, so both are pinned.
+  const rule = sel => new RegExp("\\" + sel + "\\{([^}]*)\\}").exec(SOURCE)?.[1] ?? "";
+  const box = rule(".fw-cal-scroll");
+  assert.ok(box, "the grid box is styled");
+  assert.ok(!/overflow(-x)?:(auto|scroll)/.test(box), "no horizontal scrollbar");
+  assert.ok(!/width:max-content/.test(rule(".fw-cal-grid-wrap")), "the grid does not demand its natural width");
+  const grid = rule(".fw-cal-grid");
+  assert.match(grid, /grid-auto-columns:var\(--calw/, "columns come from the measured width");
+  assert.match(grid, /grid-template-rows:repeat\(7,var\(--calw/, "rows match the columns, so cells stay square");
+  assert.match(SOURCE, /setProperty\('--calw'/, "and the component really measures the card");
+  assert.match(SOURCE, /new ResizeObserver\(fit\)/, "refitting when the card changes width");
+});
+
 test("every day is one square, levelled, with a tooltip that says what happened", async () => {
   const { render, dict } = await mount(calendar());
-  const tree = render([182, calendar(), "", false, 0]);
+  const tree = render([calendar(), "", false, 0]);
   const squares = find(tree, n => n.props?.title !== undefined && /fw-cal-cell l\d/.test(String(n.props.className)));
   assert.equal(squares.length, 9, "one per day");
   assert.deepEqual(squares.map(n => Number(n.props.className.match(/l(\d)/)[1])), [0, 2, 4, 0, 0, 1, 0, 0, 3]);
@@ -67,7 +82,7 @@ test("weeks run as columns starting on Monday, padded at the start", async () =>
   const { render } = await mount(calendar());
   // 2026-10-20 is a Tuesday: one leading blank so Monday's row stays aligned.
   const shifted = calendar({ days: calendar().days.slice(1) });
-  const tree = render([182, shifted, "", false, 0]);
+  const tree = render([shifted, "", false, 0]);
   const pads = find(tree, n => /fw-cal-cell pad/.test(String(n.props?.className)));
   assert.equal(pads.length, 1);
   const grid = find(tree, n => /^fw-cal-grid( |$)/.test(String(n.props?.className)))[0];
@@ -77,14 +92,14 @@ test("weeks run as columns starting on Monday, padded at the start", async () =>
 
 test("the summary reads the totals and streaks", async () => {
   const { render } = await mount(calendar());
-  const tree = render([182, calendar(), "", false, 0]);
+  const tree = render([calendar(), "", false, 0]);
   assert.match(text(find(tree, n => n.props?.className === "fw-cal-sum")[0]), /12 轮对话 · 活跃 4 天 · 最长连续 1 天 · 当前连续 1 天/);
 });
 
 test("the include-imported switch is a real, saved setting", async () => {
   const posts = [];
   const { render } = await mount(calendar(), { posts });
-  const tree = render([182, calendar(), "", false, 0]);
+  const tree = render([calendar(), "", false, 0]);
   const box = find(tree, n => n.props?.role === "switch")[0];
   assert.equal(box.props["aria-checked"], "false");
   assert.equal(box.props.disabled, false, "usable when Codex import is on");
@@ -95,7 +110,7 @@ test("the include-imported switch is a real, saved setting", async () => {
 test("with the switch on, the footer counts how many turns came from Codex", async () => {
   const { render } = await mount(calendar());
   const on = calendar({ includeExternal: true });
-  const tree = render([182, on, "", false, 0]);
+  const tree = render([on, "", false, 0]);
   assert.equal(find(tree, n => n.props?.role === "switch")[0].props["aria-checked"], "true");
   assert.match(text(find(tree, n => n.props?.className === "fw-cal-note")[0]), /其中 5 轮来自 Codex/);
 });
@@ -104,7 +119,7 @@ test("when Codex import is off the switch still works: it turns the import on to
   const posts = [];
   const { render, dict } = await mount(calendar(), { posts });
   const off = calendar({ externalEnabled: false, externalAvailable: false });
-  const tree = render([182, off, "", false, 0]);
+  const tree = render([off, "", false, 0]);
   const box = find(tree, n => n.props?.role === "switch")[0];
   assert.equal(box.props.disabled, false, "never a dead control");
   assert.match(text(find(tree, n => n.props?.className === "fw-cal-note")[0]), /同时开启 Codex 导入/, "and it says what ticking does");
@@ -116,7 +131,7 @@ test("when Codex import is off the switch still works: it turns the import on to
 test("unticking only clears the calendar setting; Codex import stays on", async () => {
   const posts = [];
   const { render } = await mount(calendar(), { posts });
-  const tree = render([182, calendar({ includeExternal: true }), "", false, 0]);
+  const tree = render([calendar({ includeExternal: true }), "", false, 0]);
   await find(tree, n => n.props?.role === "switch")[0].props.onClick();
   assert.deepEqual(posts.map(p => p.body.settings), [{ activityIncludeExternal: false }]);
 });
@@ -146,7 +161,7 @@ test("coming back shows the last grid at once and only refetches when it is stal
   await new Promise(r => setTimeout(r, 0));
   assert.equal(fetched.length, 1);
   const cached = JSON.parse(store["dsh-focusing.activity.v1"]);
-  assert.equal(cached.span, 182, "the grid was kept for next time");
+  assert.ok(cached.data, "the grid was kept for next time");
 
   assert.equal(squares(visit()), 9, "the next visit paints the grid immediately");
   await new Promise(r => setTimeout(r, 0));
@@ -161,13 +176,13 @@ test("coming back shows the last grid at once and only refetches when it is stal
 
 test("a broken Codex directory is reported instead of silently counting nothing", async () => {
   const { render } = await mount(calendar());
-  const tree = render([182, calendar({ includeExternal: true, externalAvailable: false }), "", false, 0]);
+  const tree = render([calendar({ includeExternal: true, externalAvailable: false }), "", false, 0]);
   assert.match(text(find(tree, n => n.props?.className === "fw-cal-note")[0]), /Codex 目录有问题/);
 });
 
 test("a failed request shows an error, not an empty grid", async () => {
   const { render } = await mount(calendar());
-  const tree = render([182, null, "boom", false, 0]);
+  const tree = render([null, "boom", false, 0]);
   assert.match(text(find(tree, n => n.props?.className === "fw-cal-err")[0]), /读取活动记录失败 · boom/);
 });
 
@@ -185,7 +200,7 @@ test("the dialog sends only what changed, so it cannot write stale values back",
 test("the whole control is one button, so clicking its text toggles it", async () => {
   const posts = [];
   const { render, dict } = await mount(calendar(), { posts });
-  const tree = render([182, calendar(), "", false, 0]);
+  const tree = render([calendar(), "", false, 0]);
   const control = find(tree, n => n.props?.role === "switch");
   assert.equal(control.length, 1, "one control");
   assert.equal(control[0].type, "button", "a button, so its label and padding are all click targets");
