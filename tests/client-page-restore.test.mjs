@@ -30,7 +30,7 @@ function mount(store) {
     ok: true, status: "done",
     digest: { id: "d", status: "done", result: null, sources: [], followups: [] },
     room: { id: "r", pending: null, turns: [] },
-    rooms: [], records: [], digests: [], sessions: [], models: [], settings: {},
+    rooms: [], records: { records: [], projects: [], workspaces: [], stats: {} }, digests: [], sessions: [], models: [], settings: {},
     range: { label: "本周" }, stats: { sessions: 0, projects: 0, activeDays: 0, calls: 0 },
   }) });
   new Function(SOURCE)();
@@ -66,10 +66,10 @@ function mount(store) {
   return { render, restore };
 }
 
-// Same state layout the other workbench tests use: 24 entries, then the
-// rooms/roomId/room states.
+// Same state layout the other workbench tests use: 25 entries, then the
+// rooms/roomId/room states. Keep this aligned with Workbench's hook order.
 const base = view => [0, view, null, null, "", [], "", "", null, "", false, "", "this-week", "", "",
-  null, "", null, null, "", false, "model", null, Date.now()];
+  [], null, "", null, null, "", false, "model", null, Date.now()];
 
 const navItems = tree => {
   const out = [];
@@ -154,7 +154,7 @@ test("filters and the expanded record survive a remount", () => {
   const store = session();
   let app = mount(store);
   // records page with a search, a range, a project and one expanded row
-  app.render([0, "records", null, null, "", [], "", "", null, "", false, "", "last-30d", "登录", "app",
+  app.render([0, "records", null, null, "", [], "", "", null, "", false, "", "last-30d", "登录", "app", ["/w/app"],
     null, "", "rec-9"]);
   app.restore();
 

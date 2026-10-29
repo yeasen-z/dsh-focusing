@@ -1,225 +1,205 @@
-# dsh-focusing
+# Focusing
 
-> 你的 context / session 管家：跨会话整理上下文、分析进度；循环检测是其中一个能力模块。
+[![npm version](https://img.shields.io/npm/v/dsh-focusing)](https://www.npmjs.com/package/dsh-focusing) [![DSH plugin](https://img.shields.io/badge/topic-dsh--plugin-7a3ef3)](https://github.com/topics/dsh-plugin)
 
-## 上下文工作台（v2）
+**你的 context · session 管家。**
 
-左侧栏点 Focusing 进入工作台。直接用一句话提要求，例如「整理我这周干了什么，进度如何」。
+Focusing 是 DeepSeek Harness（DSH）的上下文工作台，把 DSH 会话和本机 Codex 记录汇集起来：查找过去的工作、整理日报与交接、让不同会话的经验参与讨论，以及观察 Agent 是否陷入重复尝试。
 
-| 模块 | 作用 | 数据 |
-|---|---|---|
-| 工作台 | 输入框 + 预设指令 + 最近的整理结果 | — |
-| 整理与报告 | 由指令生成周报 / 日报 / 交接文档；可复制 Markdown、下载、重新生成、追问 | `${DSH_PROFILE_DIR}/dsh-focusing.digests.json`，重启后仍在 |
-| 上下文记录 | 按时间范围列出每个会话：你问了什么、最后的结论、改动的文件、待办；可打开原会话或一键生成交接文档 | 实时读取会话日志 |
-| 协作室 | 把 1～4 个会话冻结成快照放进一个**新的**协作空间：参与者轮流发言（每位可配不同模型），可生成交接简报并放进新会话输入框 | `dsh-focusing.rooms.json`；原会话只读 |
-| 专注纠偏 | 原有的单会话循环检测面板（见下文）；手动分析结果持久化；名单含未加载的历史会话，可筛「有分析记录」 | `dsh-focusing.reviews.json` |
-| 模型设置 | 全局居中小浮窗（导航底部胶囊 / 任何失败提示都能打开）：模型、连接测试、整理与专注纠偏的内容 | `dsh-focusing.analysis.json` |
+> [!WARNING]
+> **当前处于可能包含破坏性变更的早期更新阶段。** 配置格式、存储结构、页面行为及插件接口可能在后续版本中不兼容地调整，功能稳定性尚未经过充分确认。请勿直接用于关键生产数据；升级前请备份插件数据，并在测试环境验证。当前版本已在 DSH `0.2.1-rc.3` 上开发和测试，其他版本尚未确认兼容性。
 
-### 协作室：保证与限制
+## 从哪里开始
 
-- **不碰原会话**：创建时把每个会话读一遍、折叠成快照（请求、各轮结论、改动文件、命令、待办），记下读到的日志位置 `seq`。之后只再读原会话来显示「快照之后又有 N 次工具调用」，从不写入。
-- **新的空间**：协作室是 Focusing 自己的记录，不是 DSH 会话；参与者是「快照 + 模型」，每次发言是一次独立的模型调用（不创建 agent、没有工具、不能改文件）。
-- **只在你点名时发言**：「让 A 发言」「轮流一轮」；你也可以以主持人身份插话、删掉某条、或给某位重新快照。没有定时、没有自动循环。
-- **交接**：「生成交接简报」写出给新 agent 的第一条消息；「在新会话中打开」通过 `uiWorkspace.startSession(workspace, {prompt})` 只把它放进新会话的输入框，由你检查后发送。模型失败时给出不经模型的原始材料。
-- 同一个会话可以加入两次、配不同模型，用来对同一事实听两种观点。
-
-### 一次整理怎么生成
-
-1. **范围**：从指令里识别（今天 / 昨天 / 这周 / 上周 / 最近 7 天 / 本月 / 最近 30 天），也可在输入框下手动指定。按浏览器时区计算，周一为一周起点。
-2. **扫描**：`sessionPersistence.list()` 拿到全部会话；按存储修改时间跳过范围外的旧会话，**不解压**。正在运行的会话直接读内存。
-3. **折叠**（`lib/context-records.mjs`）：每个会话按轮折叠成上下文记录——真人请求（去掉 runtime context / system reminder 等注入）、每轮最后的回复、编辑过的文件、shell 命令、失败调用、todo 清单。按 revision 缓存，未变的会话不重复读取。子代理会话不算作你的工作。
-4. **数字由程序计算**：会话数、项目数、活跃天数、工具调用次数不交给模型。
-5. **归纳由模型完成**：输入按预算打包（最新的会话给全文，较旧的压缩，再多的只列标题），要求模型只依据记录输出固定 JSON（摘要、按项目进度与完成/进行/风险条目、按天回顾、下一步、附加章节）。解析后校验，模型引用的未知会话 id 会被丢弃。
-6. **模型失败也有结果**：没配置、超时或输出无法解析时，返回由记录直接生成的结构草稿，并标明原因。
-
-模型来源复用「分析设置」（DSH 已配置模型或外部 OpenAI 兼容接口）。只在你点击「开始整理」/「追问」时才调用模型。
-
-### 路由
-
-| 路由 | 用途 |
+| 你想做什么 | 打开哪个页面 |
 |---|---|
-| `GET /api/dsh-focusing.records?range=&offset=&q=&project=` | 范围内的会话记录 |
-| `GET /api/dsh-focusing.records/detail?id=` | 单个会话的完整记录 |
-| `POST /api/dsh-focusing.digest` `{request, range?, rangeLocked?, offset, session?}` | 后台生成整理结果，立即返回 id |
-| `GET /api/dsh-focusing.digest?id=` | 读取（生成中可轮询阶段） |
-| `POST /api/dsh-focusing.digest` `{action:"delete", id}` | 删除 |
-| `GET /api/dsh-focusing.digests` | 已保存列表 |
-| `POST /api/dsh-focusing.followup` `{id, question}` | 基于结果追问，答案存回结果 |
-| `GET /api/dsh-focusing.digest-export?id=` | Markdown 下载 |
-| `GET /api/dsh-focusing.rooms` | 协作室列表 |
-| `GET /api/dsh-focusing.room?id=` | 一个协作室，附每个源会话在快照之后的变化 |
-| `POST /api/dsh-focusing.room` `{action, ...}` | `create` / `say` / `turn` / `cancel` / `remove` / `resnap` / `handoff` / `target` / `opened` / `delete` |
-| `GET\|POST /api/dsh-focusing.external-models` | 外部接口的模型列表（Key 只在同源时由 Host 带上，不返回） |
+| 看最近在做哪些项目、回到已有问答或报告 | **工作台** |
+| 问“上周做了什么”“某个问题最后怎么解决的” | **问答** |
+| 按时间和项目浏览请求、改动、结论与待办 | **上下文记录** |
+| 生成周报、日报，保存自己的报告模板 | **整理与报告** |
+| 对照几个会话的经验，讨论后生成交接简报 | **协作室** |
+| 检查一个会话是否原地打转、查看分析记录 | **专注纠偏** |
 
----
+## 工作台：先看全局，再进入具体工作
 
-## 专注纠偏：检测 agent 是否在原地打转
+![工作台：能力入口、本周概览、活动日历与最近记录](docs/images/workbench.webp)
 
-这是给 DSH 的一个插件。它的出发点是一个具体的观察：模型很擅长执行，但不擅长在自己
-的循环里看清自己在循环里。所以这个插件不在模型内部做工作，而是在 **agent loop 的中间
-插入判断**——用一个独立的、不看对话的检测器决定要不要打断。
+首页是导览，集中展示五个能力入口、本周会话与项目概览、活动日历，以及最近的问答和整理结果。点击卡片进入对应页面，点击最近记录继续之前的工作。
 
-## 它靠什么判断（全部可确定性验证）
+活动日历每格代表一天，颜色深浅表示对话轮次。总轮次、活跃天数和连续活跃情况由日志计算；开启“包括外部导入的会话”后可计入 Codex，并显示其贡献。上方的本周概览与日历可能覆盖不同时间窗口。
 
-| 信号 | 含义 | 强度 |
+截图中的计数是示例数据。对话轮次、工具调用量反映活动量，不能直接换算成实际工时或生产力评分。
+
+## 问答：找到历史，再接着问
+
+![独立问答页：示例问题、侧栏对话历史与底部搜索范围](docs/images/chat.webp)
+
+在独立问答页直接输入问题，例如：
+
+- “昨天做了什么？”
+- “哪些会话改过登录相关的代码？”
+- “最近一次提到部署是在哪个会话？”
+- “比较两个项目处理 UI 问题的经验。”
+
+模型先查找会话，再按需读取内容和活动统计。查询过程折叠展示，展开可以查看调用及输出；继续追问会沿用当前问答的上下文。
+
+**先选搜索范围。** 输入框提供“最近 7 天”“最近 30 天”和“全部记录”，默认最近 30 天。查询覆盖所有工作区，但新读取的记录受所选时间窗口约束，Host 会校验这个边界。截图选择的是最近 7 天；需要查更早的工作时先扩大范围。同一问答已有的消息仍保留在上下文中。
+
+对话内容居中，输入框固定在底部。左侧“对话”按今天、昨天、更早分组，可折叠、展开更多记录，或点击 `+` 新建。窄布局下改用页内下拉框切换。
+
+问答支持停止、删除和本地保存。离开页面不会中断正在进行的查询；Host 重启时未完成的回合会标记为中断。历史问答保留最多 300 个。
+
+## 整理与报告：把工作变成可复用的文档
+
+![整理与报告：内置模板、范围选择、自定义模板入口与历史报告](docs/images/digests.webp)
+
+报告页将**模板**和**历史结果**放在一起。先选择模板与时间范围，再点击“生成”；完成后从历史列表打开、复制 Markdown、下载、追问或重新生成。
+
+| 模板 | 产出 | 使用方式 |
 |---|---|---|
-| `same-failing-result` | 同一个错误原文反复完整出现 | 最高（0.9） |
-| `same-call` | 同一个调用反复出现（同文件编辑 / 同命令） | 随次数上升 |
-| `no-progress` | 连续多步没有任何新的有效产出 | 中（0.6） |
-| `step-budget` | 本轮步数超过上限 | 安全网，**不单独触发** |
+| 周报 | 本周工作、项目进展与下一步 | 直接生成，或手动指定时间范围 |
+| 日报 | 当天各会话的进展 | 直接生成，或手动指定时间范围 |
+| 会话交接 | 目标、当前状态、关键文件、未解决问题和下一步 | 前往上下文记录，选中具体会话后生成 |
+| 自定义模板 | 由自己的指令定义整理重点 | 保存名称、指令与默认范围，可编辑或删除 |
 
-`step-budget` 单独出现时不做任何干预。这是被真实数据纠正过的设计：本插件在自己身上
-第一次触发时，唯一命中的就是步数预算（90 步），而那一轮是正常的长任务而非循环。
+内置模板只读。自定义模板保存的是整理指令和范围，复用同一条报告生成链路。报告可展示摘要、按项目进展、按天回顾、下一步和来源会话；其中数字由程序统计，描述与建议由模型归纳。
 
-## 三种干预强度
+**问答用于逐步查证，报告用于集中归纳。** 报告先由插件筛选和压缩记录，再调用模型一次生成结构化结果；报告追问则重新读取原报告涉及的会话材料。模型不可用或输出无法解析时，可以返回标明原因的结构草稿；数据读取失败会显示错误。
 
-| 级别 | 机制 | 默认 |
-|---|---|---|
-| 软 | `agent/pre-step` 在进入下一步前追加一条纠偏 message | 关闭 |
-| 硬 | `tools/pre-execute` 拒绝那个反复重复的调用（每轮每指纹一次） | 关闭 |
-| 子代理 | 起一个干净上下文的子 agent 只看事实做全局诊断，结论并入纠偏 | 关闭 |
+## 协作室：让不同会话的经验参与同一场讨论
 
-安装后默认 **全部关闭**，不会改变任何既有行为。要启用就改 `cordis.patch.yml` 里
-`config.soft.enabled: true`。
+![协作室：参与者快照、源会话更新状态和主持讨论](docs/images/collaboration.webp)
 
-## 关键设计决定
+图中把 Focusing 与 NetHack 两个项目的会话放进协作室，交流插件构建和 UI 开发经验。
 
-- **纠偏以 `source.kind = "focusing"` 的 user message 注入**，而不是藏进 system prompt。
-  原因有两个：模型无法在自己的 system prompt 里「看见」这次干预；而带自有 source
-  的 message 在 UI 里会和真人输入分开渲染，事后能区分。
-- **检测器是纯函数**（`lib/detector.mjs`），不 import 任何 DSH 包，可以脱离 Host
-  单测和回放历史会话。模型判断自己是否循环正是会失败的那件事，所以诊断必须独立。
-- **纠偏文案用第一人称自查口气**，并给出四条分支判断，而不是一句「停止重复」。
-  后者只会换来另一种循环。事实部分给出模型从循环内部看不到的东西：重复次数、
-  原始目标、已经花掉多久。
-- **面板只读**。所有决策在 Host，页面只问 `/api/dsh-focusing.state` 发生了什么。
+创建协作室时选取 1～4 个 DSH 会话，插件将请求、结论、文件、命令和待办冻结为快照。每位参与者可使用不同模型；也可把同一会话加入两次，比较不同模型对相同材料的看法。
 
-## 已验证 / 未验证
+1. **提出议题**：以主持人身份输入问题或补充背景。
+2. **点名讨论**：让某位参与者发言，或让参与者轮流一轮。每次发言根据各自快照和讨论内容生成。
+3. **核对新进展**：参与者卡片显示快照时间和此后的源会话活动。图中 A 已有新动作、B 没有；点击“重新快照”可纳入最新材料。
+4. **形成交接**：生成讨论简报，放入新会话输入框，检查后发送。
 
-已验证：
+协作室是插件保存的独立讨论记录。参与者由“快照 + 模型”组成，发言不唤醒原 Agent，也不执行工具或修改原会话。当前选取入口仅支持 DSH 会话。
 
-- 15 个单测全部通过（指纹、阈值、误报、跨轮清理、文案内容）。
-- 用真实会话日志（86 步、56 次工具调用）回放检测器：首次触发落在第 72 步，
-  命中内容正是「连续编辑同一文件 `lib/index.mjs`」，符合设计意图。
-- 插件已安装进 `desktop` profile（`application: applied`），并**在真实运行中触发过**
-  ——纠偏消息已写入会话日志的 `user/message` 事件。
+## 上下文记录与专注纠偏
 
-**未验证**：Web UI 面板的视觉与交互。Client 半部已写好但尚未在浏览器中确认渲染。
+### 上下文记录：从报告回到材料
 
-## 已知缺陷（未修复）
+按时间、项目和关键词浏览会话，展开请求、阶段结论、识别到的文件改动、命令和待办；也可从单个会话生成交接。DSH 与已启用导入的 Codex 使用统一读取入口，Codex 标记为只读。
 
-1. **`turnStartedAt` 不准**：Hot reload 后 `Detector` 重建，`turnStartedAt` 取的是
-   reload 时刻，所以纠偏里会显示「用时约 0 秒」。应从 `turn/start` 事件时间戳取，
-   而不是构造时刻。
-2. **重载后最近步骤的工具名丢失**：`pending` map 在 reload 时清空，于是重载前发出、
-   重载后才返回的调用在时间线里显示为 `?`。应以会话日志回填 `pending`。
-3. **替换已安装模块需要重启 Harness**：安装目录链接工作区不代表运行中的模块已更新。
-   disable → enable、刷新页面及相同 slot 注册均不能证明加载了新模块；请完整重启 Harness 后重新打开面板。
+列表和详情使用折叠记录，请求与回复有长度限制。需要核对更长的消息或工具输出时，历史问答可以读取原始事件；文件和命令识别仍取决于工具事件格式。
 
-## 手动分析排查修复
+### 专注纠偏：观察重复尝试，按需分析
 
-- 客户端原来引用了未定义的 `ROUTE_ANALYZE` / `ROUTE_EXPORT`。点击在发请求前失败；已补齐地址。
-- 分析只保留顶栏一个入口；点击后切到诊断页。网络错误、HTTP 错误及服务端详情直接展示，成功结果立即显示。
-- 新增执行 `onClick` 的请求测试，不再只判断按钮存在；同时覆盖重复点击、唯一入口和失败详情。
-- 本地 63 项测试通过；这些是单元/交互处理测试，**不等于浏览器里的真实模型请求已验证**。
-- 当前分析默认调用 Host 已授权的模型，也可切换到 OpenAI 兼容的外部接口；只支持已加载的会话。
-- **分析结果已持久化**：保存在 `${DSH_PROFILE_DIR}/dsh-focusing.reviews.json`，每个会话保留最近 10 次，最多 200 个会话；重启后仍在；会话重新加载后旧结论会自动出现（名单里仍只列已加载的会话，所以已卸载会话的旧分析暂时选不到）。
-- **标注获取时间**：每份结论显示「分析于 日期 时间」；非当天的带日期。
-- **标注此后有无新进展**：分析时记录当时读到的日志偏移 `seq`，打开面板时统计偏移之后的新动作（工具调用、失败、轮次、用户消息）。有新动作显示「可能已过期」并列出数量、提供「基于最新记录重新分析」；没有则显示「仍然适用」；读不到日志时明确显示「无法判断」，不假装新鲜。
-- 更早的几次分析折叠在「更早的分析」里。失败的重跑不会覆盖已有结论。
+专注纠偏提供单会话活动观察、手动模型分析和分析历史。确定性检测器关注重复错误、重复调用和缺少进展；步数预算只作为辅助信号，不单独触发干预。
 
-## 分析设置（全局浮窗）
+自动干预有软提示、重复调用拦截和子代理诊断三种，默认关闭，可在插件配置中启用。手动分析支持 DSH 历史会话和导入的 Codex 会话，结果可保存回看；DSH 会话还会提示分析之后是否有新活动。
 
-设置是一个**居中的小浮窗**，不是页面、也不是侧边抽屉。入口有三处：左侧导航底部的「分析模型 · 全局」胶囊（常显当前模型）、导航里的「设置」、以及整理失败时的「去设置模型」。
+Codex 导入只读，分析结果留在 Focusing，不会控制 Codex 或向 Codex 注入纠偏消息。
 
-- **全局**：这里选的模型对整理与报告、追问、协作室（可逐人覆盖）、专注纠偏同时生效，不影响你聊天用的模型。浮窗顶部始终写着这句话。
-- **模型是选出来的**：选项来自 DSH 当前已授权的模型目录，第一项是「跟随 DSH 当前默认模型」。一个都读不到时会说明原因，而不是悄悄变成输入框。
-- **外部接口**：填地址与 Key 后点「获取列表」从该接口读模型名，可以下拉选，也可手填。
-- **两个标签页**：`模型与连接`（来源、模型、Key、测试连接、高级参数、预览会发出去的提示词）和 `专注纠偏的内容`（分析提示词、送给它的内容开关、条数与截断）。
-- **保存按钮在没改动时是灰的**；底部会写「有未保存的更改」。Esc、点遮罩、点 × 都关闭，Tab 焦点不会跑出浮窗。
-- 连接测试只发一句测试，不带任何会话内容；测试失败不会覆盖已保存的可用设置。
+## 安装、升级与开始使用
 
-## 分析设置（字段说明）
+**要求：** DSH `>=0.2.1-rc.3 <0.3.0`。目前只在 `0.2.1-rc.3` 上完成测试。
 
-顶栏「分析设置」打开面板，可配置：
+### 从 npm 快速安装
 
-| 项目 | 说明 |
-|---|---|
-| 分析来源 | `DSH 已配置的模型`（默认）或 `外部接口服务` |
-| Provider / 模型 | 留空则跟随 DSH 默认模型 |
-| 接口地址 / API Key / 模型名 | 仅外部来源；OpenAI 兼容 chat completions |
-| 分析提示词 | 可编辑角色描述；`VERDICT/EVIDENCE/NEXT` 输出格式由程序固定附加 |
-| 送给分析的内容 | 任务目标、项目目录、工具参数、工具输出四项开关，以及条数与截断长度 |
-| 调用参数 | 最大输出 tokens、temperature、超时 |
+npm 包名是 **`dsh-focusing`**。正式版本可用后，在 DSH 打开 **插件 → 添加插件**，搜索或输入：
 
-- 「测试连接」只发一句探测文本，不发送任何聊天内容；失败会回退到之前的设置。
-- 「预览将发送的内容」完整展示系统提示词与用户消息，使用外部服务前可先确认。
-- 保存设置不会触发分析；分析仍只由「分析一下」发起。
-- API Key 只保存在 Host，通过 `/api/dsh-focusing.settings` 返回时替换为 `hasApiKey` 标记。
-
-## 结构
-
-```
-lib/detector.mjs    纯检测器：指纹、滑窗、评分（无依赖，可单测）
-lib/correction.mjs  纠偏文案生成
-lib/index.mjs       Host：事件折叠、pre-step 注入、pre-execute 拦截、子代理诊断、面板路由
-lib/client.js       Client：工作台（首页 / 结果 / 记录 / 报告）+ 专注纠偏面板
-lib/time-range.mjs  时间范围解析（纯函数）
-lib/context-records.mjs  会话日志 → 上下文记录、按范围切片、统计（纯函数）
-lib/record-index.mjs     跨会话索引与缓存（读 sessionPersistence / sessionQuery / sessions）
-lib/digest.mjs      整理提示词、预算打包、JSON 解析校验、草稿、Markdown 导出
-lib/digest-store.mjs     整理结果持久化
-lib/review-store.mjs     单会话分析持久化 + 「此后有无新进展」统计
-lib/roster.mjs           专注纠偏名单：未加载会话、折叠缓存、外部模型列表
-lib/room.mjs             协作室：快照、发言/交接提示词（纯函数）
-lib/room-routes.mjs      协作室路由与存储
-lib/complete.mjs    通用模型调用（Host 模型或外部接口）
-lib/context-routes.mjs   工作台路由
-tests/              node --test tests/*.test.mjs
+```text
+dsh-focusing
 ```
 
-## 调试
+也可以固定安装首个版本：
+
+```text
+dsh-focusing@0.0.1
+```
+
+> **当前发布状态：** npm registry 暂时只显示审核占位版本 `0.0.0-stage`，其内容不是可运行的 Focusing 插件。请等 `npm view dsh-focusing version` 返回 `0.0.1` 后再通过 npm 安装；不要安装 `dsh-focusing@0.0.0-stage`。
+
+批准安装并启用 **Focusing**，按 DSH 的提示刷新页面或重启。如果安装源返回 `404 Not Found`，请检查 npm 审核是否完成，以及当前 registry 或镜像是否已同步。当前仍处于可能包含破坏性变更的早期阶段；`0.0.x` 版本不承诺向后兼容。
+
+### 从本地仓库安装
+
+克隆仓库后，在 DSH 会话中要求使用插件管理器安装该仓库的绝对路径。也可以在仓库根目录执行：
 
 ```bash
-node --test tests/*.test.mjs
-node --check lib/index.mjs && node --check lib/client.js
-dsh --profile "$DSH_PROFILE" --dump-config | grep focusing
+npm pack
 ```
 
-### Ask about your history
+生成 `dsh-focusing-0.0.1.tgz` 后，通过 DSH 插件管理器安装该文件。不要手动修改 DSH profile 的 `package.json` 或 patch 文件，也不要把仓库手工链接进 profile。
 
-The home page and the **整理与报告 / Digests** page have a small ask box. A question
-runs a short loop inside the plugin: the Host model may call three read-only
-tools, the plugin runs them, feeds the results back, and stops when the model
-answers. It is not a DSH session and registers no tool, so no other conversation
-can see or call these tools.
+升级前请备份当前 profile 中的 `dsh-focusing.*.json` 数据文件。由于当前处于可能包含破坏性变更的阶段，新版本不保证直接兼容旧版配置和存储数据；请先在非关键 profile 中验证。替换已安装版本通常需要完整重启才能加载新的 Host 模块。
 
-Each ask is a **conversation**: a plain message list the plugin keeps itself
-(questions, answers, tool calls and their results). The next question continues
-the open conversation, so follow-ups build on what was already found. **新建对话
-/ New chat** starts another; the drop-down switches between past ones. The list
-is saved next to the digests (`dsh-focusing.digests.json.asks.json`, newest
-activity first, 100 at most) and written before the model is called, so a reload
-or Host restart loses nothing; a turn caught by a restart comes back marked
-interrupted. A running turn keeps going when you leave the page. Stop ends the
-turn and keeps the conversation; Delete removes it. A turn that fails or is
-stopped is cut back to its question, so the thread never holds a tool call
-without a result. Stored text is capped at 20,000 characters per message or tool
-result (the model still saw it whole); a result fed back to the model is clipped
-to 12,000.
+1. 安装并启用插件后，从侧栏打开 **Focusing**。入口及默认配置声明在 `package.json` 和 `cordis.patch.yml`。
+2. 点击导航顶部的设置齿轮，在“模型与连接”中选择 DSH 已配置模型，或配置外部 OpenAI 兼容接口。
+3. 如需纳入 Codex，在“来源”中开启导入。可自动查找 `CODEX_HOME`、`~/.codex`，或手动指定目录。初次索引可能需要等待。
+4. 到问答页选择搜索范围并提问；需要固定格式输出时，到整理与报告选择模板。
 
-- `focus_list_sessions`: discover DSH and enabled Codex conversations across
-  every workspace. Optional `start` / `end` are timezone-qualified ISO timestamps
-  (inclusive start, exclusive end). `sources`, `project`, `cwd` and a literal
-  `query` narrow the results. Query searches folded (shortened) requests and
-  replies, not full text; omit it when discovering broadly.
-- `focus_read_session`: read original events by `sessionId` as exact JSON
-  fragments, grouped by `eventIndex` and ordered by `offset`. Each fragment is at
-  most 2,000 characters; `limit` defaults to 5 and is capped at 10.
-- `focus_activity`: count activity over explicit `start` / `end` (at most 366
-  days). `offsetMinutes` is a fixed UTC offset, not an IANA zone.
+| 功能 | 模型来源 |
+|---|---|
+| 历史问答 | DSH Host 模型，需支持工具调用；暂不支持外部接口模式 |
+| 报告、报告追问、专注分析 | 插件模型设置：DSH 模型或外部 OpenAI 兼容接口 |
+| 协作室 | 默认跟随插件设置，也可为参与者单独选择模型 |
 
-Tools accept IDs, never filesystem paths. Codex results appear only when Codex
-import is enabled. Asking needs the Host model (not an external endpoint).
-Chat and tool-output text is untrusted material; the instructions say so.
+插件模型设置不替换普通 DSH 聊天选择的模型。保存设置不会自动分析内容；连接测试只发送探测文本。专注分析可预览将发送的提示词与材料，API Key 留在 Host，页面只收到是否已配置的标记。
 
+## 查询机制与当前边界
+
+当前历史问答由插件内部维护消息和只读工具循环，不创建 DSH 会话，也不向其他会话注册工具。它与报告共享上下文读取层，但采用按需查询方式：
+
+| 内部工具 | 返回什么 |
+|---|---|
+| `focus_list_sessions` | 按时间、来源、项目、目录或字面关键词分页查找会话及概要 |
+| `focus_read_session` | 按会话 ID 读取原始事件的 JSON 分片，可分页继续读取 |
+| `focus_activity` | 指定时间区间的每日活动统计 |
+
+- **关键词检索有范围**：列表查询匹配缩短后的请求与回复，不是全文或语义搜索。模型应先广泛发现，再读取相关会话取证。
+- **分页与文本有预算**：详情需要按 `eventIndex`、`offset` 拼接，按 `nextCursor` 继续读取；数据变化后可能需要重新查询。单个反馈给模型的工具结果超过 12,000 字符会截断，保存的单条消息或结果最多 20,000 字符。
+- **问答有调用预算**：最多进行 10 轮工具查询，之后再尝试用一次无工具模型调用归纳已取得的证据，说明覆盖不足的部分。
+- **时间处理分两条路径**：问答由模型结合当前时间、用户 UTC 偏移和选定窗口生成查询条件；报告仍使用今天、昨天、本周、上周、本月、最近 7 天和最近 30 天等固定关键词。
+- **统计不等于完整审计**：大范围报告会压缩上下文；文件、失败和命令提取依赖事件格式。活动量不能直接表示工时。
+- **历史时区使用固定偏移**：不是 IANA 时区，跨夏令时切换的时间范围需要核对。查询采用 `[start, end)`，包含开始、不包含结束；活动查询单次最多 366 天。
+
+原始会话从 DSH 服务或本机 Codex rollout 只读获取。发起问答、报告、分析和协作讨论时，相关材料会发送到所选模型服务。历史消息及工具输出作为资料处理，不能被当作新的执行指令。
+
+<details>
+<summary>本地存储与开发入口</summary>
+
+存储目录优先使用 `DSH_PROFILE_DIR`，其次 `DSH_HOME`，否则使用 Host 当前工作目录。
+
+| 文件 | 内容 |
+|---|---|
+| `dsh-focusing.analysis.json` | 模型、连接和来源设置 |
+| `dsh-focusing.digests.json` | 整理报告 |
+| `dsh-focusing.digests.json.templates.json` | 自定义报告模板，最多 50 个 |
+| `dsh-focusing.digests.json.asks.json` | 历史问答，最多 300 个 |
+| `dsh-focusing.rooms.json` | 协作室快照、讨论与简报 |
+| `dsh-focusing.reviews.json` | 单会话分析历史 |
+| `dsh-focusing.codex-index.json` | Codex 索引缓存 |
+
+| 模块 | 代码入口 |
+|---|---|
+| Host / UI | `lib/index.mjs`、`lib/client.js` |
+| 读取、折叠、索引 | `lib/context-source.mjs`、`lib/context-records.mjs`、`lib/record-index.mjs` |
+| Codex 导入 | `lib/codex-rollout.mjs`、`lib/codex-index.mjs` |
+| 历史问答 | `lib/ask.mjs`、`lib/ask-store.mjs`、`lib/context-tools.mjs` |
+| 模板与报告 | `lib/template-store.mjs`、`lib/digest.mjs`、`lib/digest-store.mjs`、`lib/context-routes.mjs` |
+| 活动与时间 | `lib/activity.mjs`、`lib/time-range.mjs` |
+| 协作室 | `lib/room.mjs`、`lib/room-routes.mjs` |
+| 检测与分析 | `lib/detector.mjs`、`lib/correction.mjs`、`lib/review.mjs`、`lib/review-store.mjs` |
+
+```bash
+# 隔离测试状态
+DSH_PROFILE_DIR="$(mktemp -d)" node --test
+
+# 检查入口语法
+node --check lib/index.mjs
+node --check lib/client.js
+```
+
+自动化测试覆盖记录、路由、模型响应处理和客户端交互逻辑。真实 Host 中的渲染、服务连接及模型调用仍需实际验证。
+
+</details>
+
+截图展示工作台、独立问答、模板报告和协作室，包含浅色与深色界面。图片使用保留原始分辨率的无损 WebP；原始 PNG 为 `profile.png`、`chat.png`、`summary.png`、`session_interact.png`。截图中的名称、计数和时间仅代表拍摄时的状态。

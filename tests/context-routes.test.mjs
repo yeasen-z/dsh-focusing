@@ -69,6 +69,15 @@ async function waitDone(h, id) {
   throw new Error("digest did not finish");
 }
 
+test("records can filter by multiple workspace paths, with an empty filter meaning all", async () => {
+  const h = setup("{}");
+  const filtered = await h.call("/api/dsh-focusing.records?range=last-7d&offset=480&cwd=%2Fw%2Fp%0A%2Fw%2Fother");
+  assert.deepEqual(filtered.workspaces, ["/w/p"]);
+  assert.deepEqual(filtered.records.map(r => r.title), ["recent work"]);
+  const all = await h.call("/api/dsh-focusing.records?range=last-7d&offset=480&cwd=");
+  assert.deepEqual(all.records.map(r => r.title), ["recent work"]);
+});
+
 test("records for this week skip old sessions without reading them", async () => {
   const h = setup("{}");
   const body = await h.call("/api/dsh-focusing.records?range=last-7d&offset=480");
@@ -220,4 +229,68 @@ test("an empty question is refused, and an external endpoint says it is not supp
   for (let i = 0; i < 50; i++) { ask = (await call(`/api/dsh-focusing.ask?id=${started.ask.id}`)).ask; if (ask.status !== "running") break; await new Promise(r => setTimeout(r, 10)); }
   assert.equal(ask.status, "failed");
   assert.equal(ask.reason, "unsupported");
+});
+
+// ---- templates --------------------------------------------------------------
+test("templates are listed with the shipped ones and can be added, edited and removed", async () => {
+  const s = setup("unused", {});
+  const list = await s.call("/api/dsh-focusing.templates");
+  assert.equal(list.ok, true);
+  assert.deepEqual(list.templates.slice(0, 3).map(t => t.id), ["builtin:weekly", "builtin:daily", "builtin:handoff"]);
+
+  const made = await s.post("/api/dsh-focusing.templates", { action: "create", name: "发布复盘", instruction: "总结发布相关的风险", range: "this-week" });
+  assert.equal(made.ok, true);
+  assert.equal((await s.call("/api/dsh-focusing.templates")).templates.at(-1).name, "发布复盘");
+
+  const edited = await s.post("/api/dsh-focusing.templates", { action: "update", id: made.template.id, name: "发布复盘 v2", instruction: "只看风险" });
+  assert.equal(edited.ok, true);
+  assert.equal((await s.call("/api/dsh-focusing.templates")).templates.at(-1).name, "发布复盘 v2");
+
+  assert.equal((await s.post("/api/dsh-focusing.templates", { action: "delete", id: made.template.id })).ok, true);
+  assert.equal((await s.call("/api/dsh-focusing.templates")).templates.length, 3);
+  assert.equal((await s.post("/api/dsh-focusing.templates", { action: "delete", id: "builtin:weekly" })).reason, "read-only");
+  assert.equal((await s.post("/api/dsh-focusing.templates", { action: "nope" })).reason, "bad-request");
+});
+
+test("a digest can be started from a template instead of typed words", async () => {
+  const s = setup(JSON.stringify({
+    title: "本周", summary: "s", projects: [], days: [], next: [], sections: [],
+  }), {});
+  const started = await s.post("/api/dsh-focusing.digest", { templateId: "builtin:weekly", offset: 480, locale: "zh" });
+  assert.equal(started.ok, true);
+  assert.equal(started.digest.request, "整理我这周干了什么，进度如何", "the template's words, not the caller's");
+  assert.equal(started.digest.templateId, "builtin:weekly");
+  assert.equal(started.digest.range.key, "this-week", "the template's own range applies");
+  let done;
+  for (let i = 0; i < 100; i++) {
+    done = (await s.call(`/api/dsh-focusing.digest?id=${started.digest.id}`)).digest;
+    if (done.status !== "running") break;
+    await new Promise(r => setTimeout(r, 10));
+  }
+  assert.equal(done.status, "done");
+});
+
+test("an unknown template is refused, and a session-scoped one cannot run from the list", async () => {
+  const s = setup("unused", {});
+  assert.equal((await s.post("/api/dsh-focusing.digest", { templateId: "tpl-nope" })).reason, "not-found");
+  assert.equal((await s.post("/api/dsh-focusing.digest", { templateId: "builtin:handoff" })).reason, "needs-session");
+});
+
+test("a question searches a window, not the whole archive, and can be widened on purpose", async () => {
+  const s = setup(JSON.stringify({ title: "t", summary: "s", projects: [], days: [], next: [], sections: [] }), {});
+  const posted = await s.post("/api/dsh-focusing.ask", { question: "上周做了什么", offset: 480 });
+  assert.equal(posted.ok, true);
+  assert.equal(posted.ask.range, "last-30d", "the default window is the last 30 days");
+  assert.equal(posted.ask.window.key, "last-30d");
+  assert.ok(posted.ask.window.start < Date.now() && posted.ask.window.end >= posted.ask.window.start);
+
+  const wide = await s.post("/api/dsh-focusing.ask", { question: "去年做过什么", offset: 480, range: "all" });
+  assert.equal(wide.ask.range, "all");
+  assert.equal(wide.ask.window, undefined, "no bound at all");
+
+  // Two turns may run at once; the third waits its turn, so start this one in a
+  // fresh host to keep the assertion about the key, not about capacity.
+  const alone = setup(JSON.stringify({ title: "t", summary: "s", projects: [], days: [], next: [], sections: [] }), {});
+  const odd = await alone.post("/api/dsh-focusing.ask", { question: "q", offset: 480, range: "not-a-range" });
+  assert.equal(odd.ask.range, "last-30d", "an unknown key falls back to the default rather than opening everything");
 });

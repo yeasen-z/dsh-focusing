@@ -17,7 +17,9 @@ function load() {
     createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
     Fragment: "Fragment",
     useEffect: () => {}, useRef: v => ({ current: v }), useCallback: f => f,
-    useState: init => { const i = index++; if (!(i in states)) states[i] = init; return [states[i], v => { states[i] = typeof v === "function" ? v(states[i]) : v; }]; },
+    // React calls a function initializer once; so does this stub, otherwise a
+    // lazily seeded state would reach the component as the function itself.
+    useState: init => { const i = index++; if (!(i in states)) states[i] = typeof init === "function" ? init() : init; return [states[i], v => { states[i] = typeof v === "function" ? v(states[i]) : v; }]; },
   };
   const api = captured.factory(n => { if (n === "react") return React; throw new Error(n); });
   const dict = {};
@@ -28,13 +30,20 @@ function load() {
     slots: { inject: (n, fn) => fn(), register: (o, c) => { if (o.name === "focusing.panel.body") Workbench = c; return () => {}; } },
   });
   const render = (preset) => {
-    states = preset; index = 0;
+    // A copy: an async setState left over from an earlier test must not write
+    // back into the shared preset array.
+    states = preset ? [...preset] : []; index = 0;
     return Workbench({ t: k => dict[k] ?? k, subscribeLocale: () => () => {}, openSession: () => {} });
   };
-  return { render, dict, store: Workbench.askStore };
+  // The page the Workbench would show next: state 1 is `view`.
+  const rerender = () => { index = 0; return Workbench({ t: k => dict[k] ?? k, subscribeLocale: () => () => {}, openSession: () => {} }); };
+  const seedTemplates = list => Workbench.tplSeed(list);
+  return { render, rerender, dict, store: Workbench.askStore, seedTemplates, view: () => states[1] };
 }
 const text = n => typeof n === "string" ? n : Array.isArray(n) ? n.map(text).join("") : n && typeof n === "object" ? (n.children || []).map(text).join("") : "";
-const find = (n, pred, out = []) => { if (n && typeof n === "object") { if (pred(n)) out.push(n); (n.children || []).forEach(c => find(c, pred, out)); } return out; };
+// Arrays are flattened the way React flattens them, so a mapped child list is
+// still found.
+const find = (n, pred, out = []) => { if (Array.isArray(n)) { n.forEach(c => find(c, pred, out)); return out; } if (n && typeof n === "object") { if (pred(n)) out.push(n); (n.children || []).forEach(c => find(c, pred, out)); } return out; };
 
 // State order in Workbench: localeTick, view, digestId, digest, digestError, digests, ask, range, home, ...
 const digest = {
@@ -47,15 +56,195 @@ const digest = {
   followups: [{ q: "还差什么", a: "- 验证" }],
 };
 
-test("home shows one compact ask box and the capability cards", () => {
-  const { render, dict } = load();
-  const tree = render([0, "home", null, null, "", [], "", "", { range: { label: "本周" }, stats: { sessions: 3, projects: 2, activeDays: 2 } }]);
+const HOME = (extra = {}) => [0, "home", null, null, "", [], "", "", { range: { label: "本周" }, stats: { sessions: 3, projects: 2, activeDays: 2 } }];
+
+test("tool-only consecutive assistant rounds render as one grouped call run", () => {
+  const env = load();
+  env.store.seed([{ id: "a", title: "q", status: "idle", steps: [], messages: [
+    user("q"),
+    { role: "assistant", content: [{ type: "tool-call", id: "c1", name: "focus_list_sessions", arguments: "{}" }] },
+    { role: "tool", toolCallId: "c1", content: [{ type: "text", text: "list result" }] },
+    { role: "assistant", content: [{ type: "tool-call", id: "c2", name: "focus_read_session", arguments: "{}" }] },
+    { role: "tool", toolCallId: "c2", content: [{ type: "text", text: "read result" }] },
+    asst("answer"),
+  ], updatedAt: Date.now() }]);
+  env.store.pick("a");
+  const tree = chatViews(env.render([0, "ask", null, null, "", [], "", "", null]))[0];
+  assert.equal(find(tree, n => n.props?.className === "fz-run").length, 1, "discovery and evidence calls share one card");
+  assert.equal(find(tree, n => n.props?.className === "fz-call").length, 2, "calls remain individually inspectable inside the group");
+});
+
+test("home is a guide: one card per feature, no input, and recent chats and digests", () => {
+  const env = load();
+  const { render, dict } = env;
+  env.store.seed([{ id: "a", title: "上周做了什么", status: "idle", messages: [], steps: [], updatedAt: Date.now() }]);
+  const tree = render(HOME());
   const all = text(tree);
   assert.match(all, new RegExp(dict.wb_heroTitle));
   assert.match(all, /3 个会话/);
-  assert.equal(find(tree, n => n.props?.className === "fw-cap").length, 3);
-  assert.equal(find(tree, n => n.type === "textarea").length, 1, "one compact ask box");
-  assert.equal(find(tree, n => n.props?.className === "fw-chat-wrap").length, 0, "no embedded chat");
+  const cards = find(tree, n => n.props?.className === "fw-cap");
+  assert.deepEqual(cards.map(n => text(n).replace(/\s+/g, "")).map(x => x.length > 0), cards.map(() => true));
+  assert.equal(cards.length, 5, "ask, records, digests, rooms, focus guard");
+  assert.equal(find(tree, n => n.type === "textarea").length, 0, "nothing is typed on the home page");
+  assert.ok(all.includes("上周做了什么"), "the latest chats are listed");
+  assert.ok(all.includes(dict.wb_recentChats) && all.includes(dict.wb_recent));
+});
+
+test("the cards open the page they describe, in the same order as the sidebar", () => {
+  const env = load();
+  const tree = env.render(HOME());
+  const cards = find(tree, n => n.props?.className === "fw-cap");
+  const opened = [];
+  // Each card sets the view through the stub state; read which one it picked.
+  for (const card of cards) { env.render(HOME()); card.props.onClick(); opened.push(env.view()); }
+  assert.deepEqual(opened, ["ask", "records", "digests", "rooms", "focus"]);
+  const nav = find(env.render(HOME()), n => String(n.props?.className ?? "").startsWith("fw-nav-item")).map(n => n.props.title);
+  assert.deepEqual(nav, [env.dict.wb_home, env.dict.wb_ask, env.dict.wb_records, env.dict.wb_digests, env.dict.wb_rooms, env.dict.wb_focus]);
+});
+
+test("the Ask page is the thread and one input; the conversation list lives in the sidebar", () => {
+  const env = load();
+  const { render, dict } = env;
+  env.store.seed([
+    { id: "a", title: "第一个话题", status: "idle", messages: [user("第一个话题"), asst("答一")], steps: [], updatedAt: 2 },
+    { id: "b", title: "第二个话题", status: "running", messages: [user("第二个话题")], steps: [], updatedAt: 1 },
+  ]);
+  env.store.pick("a");
+  const tree = render([0, "ask", null, null, "", [], "", "", null]);
+  // No second column inside the page: the thread is the page.
+  assert.equal(find(tree, n => n.props?.className === "fw-chat-side").length, 0);
+  const main = find(tree, n => n.props?.className === "fw-chat-main")[0];
+  const scroll = find(main, n => n.props?.className === "fw-chat-scroll")[0];
+  assert.ok(scroll && find(scroll, n => n.type === "textarea").length === 0, "the input is not inside the scroll area");
+  assert.equal(find(main, n => n.type === "textarea").length, 1, "exactly one input");
+  assert.equal(find(tree, n => typeof n.type === "function" && n.type.name === "ChatView").length, 1);
+
+  // The list is in the rail, above the model line.
+  const rail = find(tree, n => n.props?.className === "fw-nav-chats")[0];
+  assert.ok(rail, "a conversations block in the sidebar");
+  const items = find(rail, n => /^fw-nav-chat(\s|$)/.test(String(n.props?.className ?? "")));
+  assert.deepEqual(items.map(n => n.props.title), ["第一个话题", "第二个话题"]);
+  assert.equal(items[0].props["aria-selected"], true);
+  assert.ok(find(items[1], n => n.props?.className === "fw-spin").length, "a running chat shows a spinner");
+  const nav = find(tree, n => n.props?.className === "fw-nav-list")[0];
+  const foot = find(tree, n => n.props?.className === "fw-nav-foot")[0];
+  const order = [nav, rail, foot].map(n => JSON.stringify(tree).indexOf(JSON.stringify(n)));
+  assert.ok(order[0] < order[1] && order[1] < order[2], "nav items, then chats, then the model line");
+  assert.equal(find(tree, n => n.type === "button" && n.props?.["aria-label"] === dict.askNew).length, 1, "a new-chat control in the rail");
+  assert.equal(find(tree, n => n.type === "button" && text(n) === dict.askNew).length, 0, "and not repeated as a label");
+});
+
+test("the conversation list stays in the sidebar on every page", () => {
+  const env = load();
+  const { dict } = env;
+  env.store.seed([{ id: "a", title: "第一个话题", status: "idle", messages: [user("第一个话题")], steps: [] }]);
+  env.store.pick("a");
+  for (const view of ["home", "ask", "records", "digests", "rooms"]) {
+    const tree = env.render([0, view, null, null, "", [], "", "", null]);
+    const rail = find(tree, n => n.props?.className === "fw-nav-chats")[0];
+    assert.ok(rail, `shown on ${view}`);
+    assert.ok(find(rail, n => n.type === "button" && text(n).includes("第一个话题")).length, "with the same rows");
+    assert.equal(find(rail, n => n.type === "button" && n.props?.["aria-label"] === dict.askNew).length, 1);
+  }
+});
+
+test("picking a conversation from another page opens it", () => {
+  const env = load();
+  const { dict } = env;
+  env.store.seed([
+    { id: "a", title: "第一个话题", status: "idle", messages: [user("a")], steps: [] },
+    { id: "b", title: "第二个话题", status: "idle", messages: [user("b")], steps: [] },
+  ]);
+  env.store.pick("a");
+  const tree = env.render([0, "digests", null, null, "", [], "", "", null]);
+  assert.equal(env.view(), "digests");
+  const rail = find(tree, n => n.props?.className === "fw-nav-chats")[0];
+  const second = find(rail, n => n.type === "button" && text(n).includes("第二个话题"))[0];
+  second.props.onClick();
+  assert.equal(env.store.activeId(), "b", "the thread opens");
+  assert.equal(env.view(), "ask", "and its page comes up");
+  // The + button does the same with a fresh chat.
+  env.render([0, "records", null, null, "", [], "", "", null]);
+  const again = find(env.render([0, "records", null, null, "", [], "", "", null]), n => n.props?.className === "fw-nav-chats")[0];
+  find(again, n => n.type === "button" && n.props?.["aria-label"] === dict.askNew)[0].props.onClick();
+  assert.equal(env.store.active(), undefined);
+  assert.equal(env.view(), "ask");
+});
+
+test("many conversations are grouped by day, each group shows a few, and folding works", () => {
+  const env = load();
+  const { render, dict } = env;
+  const day = 864e5;
+  const now = Date.now();
+  const many = [];
+  for (let i = 0; i < 12; i++) many.push({ id: `t${i}`, title: `今天 ${i}`, status: "idle", messages: [user(`t${i}`)], steps: [], updatedAt: now - i * 6e4 });
+  for (let i = 0; i < 10; i++) many.push({ id: `y${i}`, title: `昨天 ${i}`, status: "idle", messages: [user(`y${i}`)], steps: [], updatedAt: now - day - i * 6e4 });
+  for (let i = 0; i < 40; i++) many.push({ id: `o${i}`, title: `更早 ${i}`, status: "idle", messages: [user(`o${i}`)], steps: [], updatedAt: now - 5 * day - i * 6e4 });
+  env.store.seed(many);
+  env.store.pick("t0");
+  const tree = render([0, "ask", null, null, "", [], "", "", null]);
+  const rail = find(tree, n => n.props?.className === "fw-nav-chats")[0];
+  const heads = find(rail, n => n.props?.className === "fw-nav-group-head");
+  assert.deepEqual(heads.map(n => text(n)), ["今天12", "昨天10", "更早40"]);
+  const groups = find(rail, n => n.props?.className === "fw-nav-group");
+  assert.equal(groups.length, 3);
+  // Each group shows at most 8 rows, with a count for the rest.
+  const rows = find(rail, n => /^fw-nav-chat(\s|$)/.test(String(n.props?.className ?? "")));
+  assert.equal(rows.length, 8 + 8 + 8, "three groups, eight rows each");
+  const more = find(rail, n => n.props?.className === "fw-nav-more");
+  assert.deepEqual(more.map(n => text(n)), ["还有 4 条", "还有 2 条", "还有 32 条"]);
+  assert.equal(find(rail, n => text(n) === "更早 39").length, 0, "beyond the first eight is not rendered yet");
+
+  // "还有 N 条" reveals the rest of that group only. Clicks go through the
+  // stub's own state, so re-render without resetting it.
+  more[2].props.onClick();
+  const after = find(env.rerender(), n => /^fw-nav-chat(\s|$)/.test(String(n.props?.className ?? "")));
+  assert.equal(after.length, 8 + 8 + 40);
+  assert.equal(find(after, n => text(n) === '更早 39').length, 1, "the rest is now reachable");
+
+  // Folding a group hides its rows and keeps its count.
+  const heads2 = find(env.rerender(), n => n.props?.className === "fw-nav-group-head");
+  heads2[1].props.onClick();
+  const folded = env.rerender();
+  const fg = find(folded, n => n.props?.className === "fw-nav-group");
+  assert.equal(fg.length, 3, "the header stays");
+  assert.equal(find(folded, n => /^fw-nav-chat(\s|$)/.test(String(n.props?.className ?? ""))).length, 8 + 40, "yesterday's rows are gone");
+  assert.equal(find(folded, n => n.props?.className === "fw-nav-group-head")[1].props["aria-expanded"], false);
+});
+
+test("the thread header keeps the title and delete, without a second list", () => {
+  const env = load();
+  const { render, dict } = env;
+  env.store.seed([{ id: "a", title: "第一个话题", status: "idle", messages: [user("q"), asst("a")], steps: [] }]);
+  env.store.pick("a");
+  const tree = render([0, "ask", null, null, "", [], "", "", null]);
+  const head = find(tree, n => n.props?.className === "fw-chat-head")[0];
+  assert.ok(text(head).includes("第一个话题"), "the open chat is named");
+  assert.equal(find(head, n => n.type === "button" && text(n) === dict.askDelete).length, 1, "delete offers itself once");
+  // The narrow-panel select stays in the tree but is not a second visible list.
+  assert.equal(find(head, n => n.type === "button" && /^fw-nav-chat/.test(String(n.props?.className ?? ""))).length, 0);
+});
+
+test("a new chat shows suggestions that send themselves; a running turn offers Stop instead of Send", () => {
+  const env = load();
+  const { render, dict } = env;
+  const sent = [];
+  env.store.seed([]);
+  env.store.newChat();
+  const orig = env.store.send; env.store.send = q => { sent.push(q); };
+  const fresh = render([0, "ask", null, null, "", [], "", "", null]);
+  assert.equal(find(fresh, n => n.type === "textarea")[0].props.placeholder, dict.askPlaceholder);
+  assert.ok(text(fresh).includes(dict.askEmptyTitle));
+  const chips = find(fresh, n => n.props?.className === "fw-chip");
+  assert.equal(chips.length, 4);
+  env.store.send = orig;
+
+  env.store.seed([{ id: "r", title: "q", status: "running", messages: [user("q")], steps: [] }]);
+  env.store.pick("r");
+  const running = render([0, "ask", null, null, "", [], "", "", null]);
+  const labels = find(running, n => n.type === "button").map(n => text(n));
+  assert.ok(labels.includes(dict.askStop) && !labels.includes(dict.askSend), "Stop replaces Send while it runs");
+  assert.equal(find(running, n => n.type === "textarea")[0].props.placeholder, dict.askFollowPh, "an open chat asks for a follow-up");
 });
 
 test("a finished digest renders summary, projects, days, next steps and follow-ups", () => {
@@ -79,18 +268,20 @@ test("a running digest shows its stages", () => {
 test("records and digests views render lists", () => {
   const { render } = load();
   const rec = { id: "s1", title: "修复登录", project: "app", gist: "g", turns: 2, calls: 5, todosDone: 1, todosTotal: 2, lastAt: Date.now() };
-  const states = [0, "records", null, null, "", [], "", "", null, "", false, "", "this-week", "", "", { ok: true, records: [rec], stats: { sessions: 1, turns: 2, calls: 5 }, range: { label: "本周", from: "a", to: "b" }, projects: ["app"] }, ""];
-  assert.ok(text(render(states)).includes("修复登录"));
+  const states = [0, "records", null, null, "", [], "", "", null, "", false, "", "this-week", "", "", ["/w/app"], { ok: true, records: [rec], stats: { sessions: 1, turns: 2, calls: 5 }, range: { label: "本周", from: "a", to: "b" }, projects: ["app"], workspaces: ["/w/app"] }, ""];
+  const renderedRecords = render(states);
+  assert.ok(text(renderedRecords).includes("修复登录"));
+  assert.ok(find(renderedRecords, n => String(n.props?.className||'').includes('fw-workspace-tag')).length > 0, "workspace tags are available");
   const all = text(render([0, "digests", null, null, "", [{ id: "d1", title: "本周工作整理", kind: "weekly", range: { label: "本周" }, createdAt: Date.now() }], "", "", null]));
   assert.ok(all.includes("本周工作整理"));
 });
 
 // Room states start at index 24: rooms, roomId, room, roomErr, form, pickList, modelList, sayText, roomBusy.
 // Workbench hook order: localeTick, view, digestId, digest, digestError, digests,
-// ask, range, home, fu, fuBusy, fuError, recRange, recQuery, recProject, records,
+// ask, range, home, fu, fuBusy, fuError, recRange, recQuery, recProject, recWorkspaces, records,
 // recError, expanded, detail, toast, settingsOpen, settingsTab, savedModel, now,
 // rooms, roomId, room, roomErr, form, pickList, modelList, sayText, roomBusy.
-const base = view => [...[0, view, null, null, "", [], "", "", null, "", false, "", "this-week", "", "",
+const base = view => [...[0, view, null, null, "", [], "", "", null, "", false, "", "this-week", "", "", [],
   null, "", null, null, "", false, "model", null, Date.now()]];
 
 test("rooms view lists rooms and the new-room form offers sessions and per-participant models", () => {
@@ -200,14 +391,14 @@ const result = (toolCallId, text) => ({ role: "tool", toolCallId, content: [{ ty
 const withAsks = (list, load, open = list[0]?.id) => {
   load.store.seed(list);
   if (open) load.store.pick(open); else load.store.newChat();
-  return [0, "home", null, null, "", [], "", "", { range: { label: "本周" }, stats: { sessions: 1, projects: 1, activeDays: 1 } }];
+  return [0, "ask", null, null, "", [], "", "", null];
 };
 // Function components are not expanded by the stub React: find the ChatView
 // node and call it with its own props, as React would.
 const chatViews = (tree) => find(tree, n => typeof n.type === "function" && n.type.name === "ChatView").map(n => n.type(n.props));
 const runDetails = (tree) => find(tree, n => n.type === "details" && n.props?.className === "fz-run");
 
-test("a conversation shows the thread: questions, answers, and tool calls collapsed between them", () => {
+test("a conversation shows the thread: questions, answers, and tool calls folded above each answer", () => {
   const env = load();
   const { render, dict } = env;
   const conv = {
@@ -215,7 +406,7 @@ test("a conversation shows the thread: questions, answers, and tool calls collap
     messages: [
       user("上周做了什么"),
       asst("", { id: "c1", name: "focus_list_sessions", arguments: '{"query":"登录"}' }, { id: "c2", name: "focus_read_session", arguments: '{"sessionId":"s1"}' }),
-      result("c1", '{"total":2}'), result("c2", "Error: nope"),
+      result("c1", '{"total":2}'), { ...result("c2", "Error: nope"), isError: true },
       asst("做了登录修复。"),
       user("具体哪个项目？"),
       asst("是 dsh-focusing。"),
@@ -227,10 +418,10 @@ test("a conversation shows the thread: questions, answers, and tool calls collap
   const all = text(tree);
   assert.ok(all.includes("上周做了什么") && all.includes("具体哪个项目？"), "both questions are in the thread");
   assert.equal(find(tree, n => n.props?.className === "fw-msg-user").length, 2);
-  // Answers are markdown: they reach the Md component as its `text` prop, in order.
   const md = find(tree, n => typeof n.type === "function" && typeof n.props?.text === "string").map(n => n.props.text);
   assert.deepEqual(md, ["做了登录修复。", "是 dsh-focusing。"]);
   assert.ok(all.includes(`2 ${dict.toolCalls}`), "the two calls are one folded run");
+  assert.ok(all.includes(`1 ${dict.failed}`), "and the failed one is counted");
   assert.ok(all.includes("focus_list_sessions") && all.includes("query=登录"), "the call and its arguments are shown");
   assert.equal(runDetails(tree).length, 1);
   assert.equal(runDetails(tree)[0].props.open, false, "collapsed once finished");
@@ -251,47 +442,135 @@ test("a running turn says so and keeps its calls open so the work is visible", (
 
 test("a failed turn shows its reason as an alert and keeps the question", () => {
   const env = load();
-  const { render, dict } = env;
+  const { render } = env;
   const tree = chatViews(render(withAsks([{ id: "x1", title: "q", status: "failed", steps: [], messages: [user("问过的内容")], detail: "HTTP 500" }], env)))[0];
   assert.ok(text(tree).includes("HTTP 500"));
   assert.ok(text(tree).includes("问过的内容"));
   assert.equal(find(tree, n => n.props?.role === "alert").length, 1);
-  assert.ok(find(tree, n => n.type === "button" && n.children.includes(dict.askDelete)).length >= 1);
 });
 
 test("stopped and interrupted turns keep the thread and say why they ended", () => {
   const env = load();
   const { render, dict } = env;
-  const base = { id: "a", title: "问过的内容", messages: [user("问过的内容")], steps: [{ kind: "call", id: "c1", name: "focus_activity", arguments: "{}", status: "done", result: "{}" }], createdAt: Date.now() };
+  const base = { id: "a", title: "问过的内容", messages: [user("问过的内容")], steps: [], createdAt: Date.now() };
   const stopped = chatViews(render(withAsks([{ ...base, status: "cancelled" }], env)))[0];
   assert.ok(text(stopped).includes("问过的内容") && text(stopped).includes(dict.askCancelled));
   const interrupted = chatViews(render(withAsks([{ ...base, id: "b", status: "interrupted" }], env)))[0];
   assert.ok(text(interrupted).includes(dict.askInterrupted));
-  // Both can be deleted; only a running one offers Stop.
-  const buttons = tree => find(tree, n => n.type === "button").map(n => text(n));
-  assert.ok(buttons(stopped).includes(dict.askDelete) && !buttons(stopped).includes(dict.askStop));
-  const live = chatViews(render(withAsks([{ ...base, id: "c", status: "running" }], env)))[0];
-  assert.ok(buttons(live).includes(dict.askStop) && buttons(live).includes(dict.askDelete));
 });
 
-test("there is a way to start a new chat, and to switch between past ones", () => {
+test("on a narrow panel the chat list gives way to a drop-down, and the sheet says so", () => {
   const env = load();
   const { render, dict } = env;
   const a = { id: "a", title: "第一个话题", status: "idle", messages: [user("第一个话题")], steps: [] };
   const b = { id: "b", title: "第二个话题", status: "idle", messages: [user("第二个话题")], steps: [] };
-  const tree = render(withAsks([a, b], env, "a"));
-  const select = find(tree, n => n.type === "select")[0];
-  assert.ok(select, "a switcher lists the conversations");
-  const options = find(select, n => n.type === "option").map(n => text(n));
-  assert.deepEqual(options, [dict.askNew, "第一个话题", "第二个话题"]);
-  assert.equal(select.props.value, "a", "the open one is selected");
-  assert.ok(find(tree, n => n.type === "button" && text(n) === dict.askNew).length >= 1, "and a visible new-chat button while one is open");
-
+  env.store.seed([a, b]); env.store.pick("a");
+  const tree = render([0, "ask", null, null, "", [], "", "", null]);
+  const select = find(tree, n => n.type === "select" && n.props?.className === "fw-chat-pick")[0];
+  assert.ok(select, "a drop-down carries the same list when the rail cannot");
+  assert.deepEqual(find(select, n => n.type === "option").map(n => text(n)), [dict.askNew, "第一个话题", "第二个话题"]);
+  assert.equal(select.props.value, "a");
   select.props.onChange({ target: { value: "b" } });
   assert.equal(env.store.activeId(), "b");
   select.props.onChange({ target: { value: "" } });
-  assert.equal(env.store.active(), undefined, "choosing the first entry starts afresh");
-  const fresh = render(withAsks([a, b], env, null));
-  assert.equal(chatViews(fresh).length, 0, "no thread is shown for a new chat");
-  assert.equal(find(fresh, n => n.type === "button" && text(n) === dict.askNew).length, 0, "and no redundant button");
+  assert.equal(env.store.active(), undefined, "the first entry starts a new chat");
+  const compact = /@container\(max-width:820px\)\{[^\n]*/.exec(SOURCE)?.[0] ?? "";
+  assert.match(compact, /\.fw-nav-chats\{display:none\}/, "a 56px rail cannot hold the list");
+  assert.match(compact, /\.fw-chat-pick\{display:block\}/, "so the header takes over");
+});
+
+test("the running spinner stays small enough for a 12px row", () => {
+  const size = sel => { const m = new RegExp(sel.replace(/[.]/g, "\\.") + "\\{width:(\\d+)px").exec(SOURCE); return m ? Number(m[1]) : null; };
+  const base = size(".fw-spin");
+  assert.ok(base !== null && base <= 11, `a ring bigger than the text reads as an icon: ${base}`);
+  const rail = size(".fw-nav-chat .fw-spin");
+  assert.ok(rail !== null && rail < base, "and smaller still beside 12px titles");
+  assert.match(SOURCE, /\.fw-spin\{[^}]*border:1\.5px solid/);
+});
+
+const TEMPLATES = [
+  { id: "builtin:weekly", name: "周报", instruction: "整理我这周干了什么，进度如何", range: "this-week", builtin: true },
+  { id: "builtin:daily", name: "日报", instruction: "总结今天各会话的进展", range: "today", builtin: true },
+  { id: "builtin:handoff", name: "会话交接", instruction: "把「{title}」整理成交接文档", range: "session", builtin: true, needsSession: true },
+  { id: "tpl-1", name: "发布复盘", instruction: "总结本周发布相关的改动、风险和阻塞", range: "" },
+];
+const DIGESTS = [0, "digests", null, null, "", [], "", "", null];
+
+test("the Digests page offers templates instead of a text box, and can add its own", () => {
+  const env = load();
+  const { render, dict } = env;
+  env.seedTemplates(TEMPLATES);
+  const tree = render(DIGESTS);
+  assert.equal(find(tree, n => n.type === "textarea").length, 0, "no free-text box: asking is the Ask page's job");
+  const rows = find(tree, n => n.props?.className === "fw-tpl");
+  assert.equal(rows.length, 4);
+  assert.ok(text(rows[0]).includes("周报") && text(rows[0]).includes("整理我这周干了什么"));
+  assert.ok(text(rows[3]).includes("发布复盘"), "your own template is listed with the shipped ones");
+  const labels = rows.map(r => find(r, n => n.type === "button").map(n => text(n)));
+  assert.ok(labels[0].includes(dict.wb_generate) && !labels[0].includes(dict.wb_tplEdit), "a shipped template runs but cannot be edited");
+  assert.ok(text(rows[0]).includes(dict.wb_tplBuiltin));
+  assert.ok(labels[2].includes(dict.wb_tplGoRecords), "the handoff template points at the records page");
+  assert.ok(!labels[2].includes(dict.wb_generate), "and cannot be run from here");
+  assert.ok(labels[3].includes(dict.wb_generate) && labels[3].includes(dict.wb_tplEdit), "your own can be run and edited");
+});
+
+test("generating from a template asks for that template, not a typed request", () => {
+  const env = load();
+  const { render } = env;
+  env.seedTemplates(TEMPLATES);
+  const posts = [];
+  globalThis.fetch = async (url, init) => { if (init?.method === "POST") posts.push({ url, body: JSON.parse(init.body) }); return { ok: true, json: async () => ({ ok: true, digest: { id: "d9", status: "running", request: "x" } }) }; };
+  const tree = render(DIGESTS);
+  const weekly = find(tree, n => n.props?.className === "fw-tpl")[0];
+  find(weekly, n => n.type === "button" && text(n).includes(env.dict.wb_generate))[0].props.onClick();
+  const post = posts.at(-1);
+  assert.match(post.url, /dsh-focusing\.digest$/);
+  assert.equal(post.body.templateId, "builtin:weekly");
+  assert.equal(post.body.request, undefined, "the words live in the template");
+  assert.equal(post.body.rangeLocked, undefined, "the template's own range applies unless the person overrides it");
+});
+
+test("a new template form saves a name, an instruction and a range", () => {
+  const env = load();
+  const { render, dict } = env;
+  env.seedTemplates(TEMPLATES);
+  const tree = render(DIGESTS);
+  const open = find(tree, n => n.type === "button" && text(n) === dict.wb_newTemplate)[0];
+  assert.ok(open, "a way to add one");
+  const posts = [];
+  globalThis.fetch = async (url, init) => { if (init?.method === "POST") posts.push(JSON.parse(init.body)); return { ok: true, json: async () => ({ ok: true, templates: TEMPLATES }) }; };
+  open.props.onClick();
+  const form = env.rerender();
+  const name = find(form, n => n.type === "input")[0];
+  const instruction = find(form, n => n.type === "textarea")[0];
+  assert.ok(name && instruction, "a name and an instruction");
+  assert.equal(find(form, n => n.type === "button" && text(n) === dict.wb_tplSave)[0].props.disabled, true, "cannot save while empty");
+  name.props.onChange({ target: { value: "发布复盘" } });
+  instruction.props.onChange({ target: { value: "总结本周发布相关的改动" } });
+  const filled = env.rerender();
+  const save = find(filled, n => n.type === "button" && text(n) === dict.wb_tplSave)[0];
+  assert.equal(save.props.disabled, false);
+  save.props.onClick();
+  assert.deepEqual(posts.at(-1), { action: "create", id: null, name: "发布复盘", instruction: "总结本周发布相关的改动", range: "" });
+});
+
+test("your own template can be edited and deleted; the shipped ones offer neither", () => {
+  const env = load();
+  const { render, dict } = env;
+  env.seedTemplates(TEMPLATES);
+  const posts = [];
+  globalThis.fetch = async (url, init) => { if (init?.method === "POST") posts.push(JSON.parse(init.body)); return { ok: true, json: async () => ({ ok: true, templates: TEMPLATES }) }; };
+  const rows = find(render(DIGESTS), n => n.props?.className === "fw-tpl");
+  const own = rows[3];
+  find(own, n => n.type === "button" && text(n) === dict.wb_tplEdit)[0].props.onClick();
+  const form = env.rerender();
+  assert.equal(find(form, n => n.type === "input")[0].props.value, "发布复盘", "editing starts from what is saved");
+  find(form, n => n.type === "button" && text(n) === dict.wb_tplSave)[0].props.onClick();
+  assert.equal(posts.at(-1).action, "update");
+  assert.equal(posts.at(-1).id, "tpl-1");
+
+  const again = find(env.rerender(), n => n.props?.className === "fw-tpl")[3];
+  find(again, n => n.type === "button" && n.props?.["aria-label"] === dict.wb_delete)[0].props.onClick();
+  assert.deepEqual(posts.at(-1), { action: "delete", id: "tpl-1" });
+  assert.equal(find(rows[0], n => n.type === "button" && n.props?.["aria-label"] === dict.wb_delete).length, 0, "a shipped template has no delete");
 });

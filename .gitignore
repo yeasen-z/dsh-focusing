@@ -1,0 +1,8 @@
+# npm package archives
+*.tgz
+
+# Original screenshots; optimized WebP copies live in docs/images/.
+/profile.png
+/chat.png
+/summary.png
+/session_interact.png

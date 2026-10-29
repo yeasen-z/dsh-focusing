@@ -188,3 +188,14 @@ test("a turn cut short leaves no tool call without its result in the thread", as
   assert.equal(stopped.status, "cancelled");
   assert.deepEqual(stopped.messages.map(m => m.role), ["user"], "cut back to the question");
 });
+
+test("at most 300 conversations are kept; the oldest are pruned", async () => {
+  const store = createAskStore({ file: join(dir, "cap.json") });
+  for (let i = 0; i < 305; i++) await store.put({ id: `c${i}`, title: `t${i}`, status: "idle", messages: [], steps: [], createdAt: i + 1 });
+  const list = await store.list();
+  assert.equal(list.length, 300);
+  assert.equal(list.some(c => c.title === "t0"), false, "the oldest five are gone");
+  assert.equal(list.find(c => c.title === "t304").id, "c304", "the newest is there");
+  const disk = JSON.parse(readFileSync(join(dir, "cap.json"), "utf8"));
+  assert.equal(disk.asks.length, 300, "and the file holds no more either");
+});

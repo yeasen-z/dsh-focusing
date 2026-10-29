@@ -37,9 +37,15 @@ test('tools register host-compatible definitions and disposers', async()=>{
   const narrowed=await definitions[0].execute({cwd:'/work'},exec);
   assert.equal(JSON.parse(narrowed).total,1, "cwd narrows to one workspace");
   assert.equal(definitions[0].output.render({},value)[0].text,value);
+  assert.equal(JSON.parse(value).items.length,2);
+  assert.match(definitions[1].description,/6,000 characters/);
 });
 test('full raw content survives bounded pagination; changed content invalidates cursor',async()=>{
   const f=fixture(); const query=createContextQueries(f.source);
+  const defaultPage=await query('focus_read_session',{sessionId:'codex:x'},exec);
+  assert.equal(defaultPage.items.length,6);
+  assert.equal(defaultPage.items[0].text.length,6000);
+  assert.equal(defaultPage.nextCursor,null, 'a typical session fits in one default read');
   let cursor; const fragments=[];
   do {const result=await query('focus_read_session',{sessionId:'codex:x',limit:2,...cursor?{cursor}:{}},exec);fragments.push(...result.items);cursor=result.nextCursor;} while(cursor);
   const text=fragments.filter(x=>x.eventIndex===0).map(x=>x.text).join('');
@@ -65,4 +71,27 @@ test('workspace, source, time, cursor and cancellation boundaries',async()=>{
   assert.equal((await query('focus_activity',{start:'2026-10-29T00:00:00Z',end:'2026-10-30T00:00:00Z',cwd:'/work'},exec)).total,1);
   f.disable();
   await assert.rejects(query('focus_read_session',{sessionId:'codex:x'},exec),/unavailable/);
+});
+
+test('a window bounds every query, and a range wholly outside it is refused', async()=>{
+  const f=fixture();
+  const window={start:at-1000,end:at+1000};
+  const query=createContextQueries(f.source,{bound:window});
+  // A list with no dates at all still only covers the window.
+  const listed=await query('focus_list_sessions',{},exec);
+  assert.deepEqual(listed.range,window);
+  // The model asking for something wider is clamped, not obeyed.
+  const wide=await query('focus_list_sessions',{start:new Date(0).toISOString(),end:new Date(at+9e9).toISOString()},exec);
+  assert.equal(wide.range.start,window.start);
+  assert.equal(wide.range.end,window.end);
+  // Reading a session only returns events inside the window.
+  const read=await query('focus_read_session',{sessionId:'codex:x'},exec);
+  assert.ok(read.items.length>0);
+  assert.equal(read.range.start,window.start);
+  // Wholly before the window: nothing to read, and it says so.
+  await assert.rejects(query('focus_list_sessions',{start:'2020-01-01T00:00:00Z',end:'2020-02-01T00:00:00Z'},exec),/outside the window/);
+  // No window means everything still works.
+  const open=await createContextQueries(f.source)('focus_list_sessions',{},exec);
+  assert.equal(open.range.start,0);
+  assert.equal(open.range.end,null);
 });

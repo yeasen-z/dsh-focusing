@@ -43,10 +43,10 @@ const find = (n, p, o = []) => { if (n && typeof n === "object") { if (p(n)) o.p
 const text = n => typeof n === "string" ? n : Array.isArray(n) ? n.map(text).join("") : n && typeof n === "object" ? (n.children || []).map(text).join("") : "";
 const cells = tree => find(tree, n => /(^| )fw-cal-cell( |$)/.test(String(n.props?.className)) && !/legend/.test(String(n.props?.className)) && n.props?.title !== undefined || /fw-cal-cell pad/.test(String(n.props?.className)));
 
-test("the calendar is on the home page, between the hero and the capability cards", () => {
+test("the calendar is on the home page, between the entry cards and the recent lists", () => {
   assert.match(SOURCE, /h\(ActivityCalendar,\{t,openSettings,onCodexStatus:setCodexStatus\}\)/);
-  const order = ["wb_heroTitle", "calTitle", "wb_capTitle"].map(k => SOURCE.indexOf(`t('${k}')`, SOURCE.indexOf("function renderHome")));
-  assert.ok(order[0] > 0 && order[0] < order[1] && order[1] < order[2], "hero, then activity, then capabilities");
+  const order = ["wb_heroTitle", "calTitle", "wb_recentChats"].map(k => SOURCE.indexOf(`t('${k}')`, SOURCE.indexOf("function renderHome")));
+  assert.ok(order[0] > 0 && order[0] < order[1] && order[1] < order[2], "hero and entry cards, then activity, then what was done lately");
 });
 
 test("the year fits the card: no horizontal bar, and columns are sized to the width", () => {

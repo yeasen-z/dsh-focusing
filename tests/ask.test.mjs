@@ -103,13 +103,18 @@ test("a huge tool result is clipped for the model but kept whole in the record",
   assert.ok(fed.length < 13000 && /omitted/.test(fed));
 });
 
-test("a model that never stops asking for tools is cut off with a clear reason", async () => {
-  const turns = Array.from({ length: MAX_STEPS + 2 }, () => toolTurn(call("c", "t", {})));
-  const { llm } = scripted(turns);
+test("a model that exhausts the tool budget must summarize collected evidence", async () => {
+  const turns = [
+    ...Array.from({ length: MAX_STEPS }, () => toolTurn(call("c", "t", {}))),
+    textTurn("根据已经查到的记录，目前可以确认……（覆盖可能不完整）"),
+  ];
+  const { llm, requests } = scripted(turns);
   const out = await runAsk({ llm, route, tools: [tool("t", async () => "x")], messages: say("q"), settings });
-  assert.equal(out.ok, false);
-  assert.equal(out.reason, "too-many-steps");
+  assert.equal(out.ok, true);
+  assert.equal(out.partial, true);
+  assert.match(out.answer, /覆盖可能不完整/);
   assert.equal(out.steps.filter(s => s.kind === "call").length, MAX_STEPS);
+  assert.deepEqual(requests.at(-1).tools, [], "the final synthesis cannot request another tool");
 });
 
 test("provider failures, empty answers and a missing model are reported, not thrown", async () => {
@@ -142,6 +147,12 @@ test("the person's timezone and the current time are given to the model", async 
   assert.match(requests[0].system, /NOW: 2026-10-29T04:00:00.000Z/);
   assert.match(requests[0].system, /UTC\+08:00/);
   assert.match(requests[0].system, /offsetMinutes=480/);
+});
+
+test("Ask leaves maxTokens unset so the provider can use its default", async () => {
+  const { llm, requests } = scripted([textTurn("ok")]);
+  await runAsk({ llm, route, tools: [], messages: say("q"), settings: { temperature: null, maxTokens: 1024 } });
+  assert.ok(!("maxTokens" in requests[0]));
 });
 
 test("an unset temperature is not sent; a set one is", async () => {

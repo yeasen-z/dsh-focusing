@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Focusing",
-    "description": "Your context and session keeper: organize work across sessions (ask \"summarize what I did this week and how far along it is\" to get a weekly, daily or handoff digest), browse a time-sliced archive of every session, and keep loop detection that injects a whole-picture correction when a turn starts repeating itself."
+    "description": "Experimental context and session workbench for cross-session Q&A, records, reports, collaboration, and loop detection. Early releases may contain breaking changes and are not yet fully stability-tested."
   },
   "panel": {
     "title": "Focusing",
