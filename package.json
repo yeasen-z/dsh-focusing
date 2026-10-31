@@ -1,6 +1,6 @@
 {
   "name": "dsh-focusing",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "description": "Experimental context and session workbench for DSH; early releases may contain breaking changes.",
   "keywords": [

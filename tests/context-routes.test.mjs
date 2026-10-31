@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerContextRoutes } from "../lib/context-routes.mjs";
 import { normalizeSettings } from "../lib/settings.mjs";
+import { BUILTIN_TEMPLATES } from "../lib/template-store.mjs";
 
 const dir = realpathSync(mkdtempSync(join(tmpdir(), "focusing-ctx-test-")));
 after(() => { if (dir.startsWith(realpathSync(tmpdir()))) rmSync(dir, { recursive: true, force: true }); });
@@ -278,7 +279,7 @@ test("a digest can be started from a template instead of typed words", async () 
   }), {});
   const started = await s.post("/api/dsh-focusing.digest", { templateId: "builtin:weekly", offset: 480, locale: "zh" });
   assert.equal(started.ok, true);
-  assert.equal(started.digest.request, "整理我这周干了什么，进度如何", "the template's words, not the caller's");
+  assert.equal(started.digest.request, BUILTIN_TEMPLATES.find(t => t.id === "builtin:weekly").instruction, "the template's words, not the caller's");
   assert.equal(started.digest.templateId, "builtin:weekly");
   assert.equal(started.digest.range.key, "this-week", "the template's own range applies");
   let done;

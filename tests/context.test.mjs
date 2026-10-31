@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveRange, inferRangeKey, localDate } from "../lib/time-range.mjs";
 import { foldRecord, isPersonal, sliceRecord, recordSummary, rangeStats, humanRequest } from "../lib/context-records.mjs";
-import { extractJson, normalizeDigest, draftDigest, buildContextBlock, buildDigestPrompt, digestToMarkdown } from "../lib/digest.mjs";
+import { DIGEST_SYSTEM, extractJson, normalizeDigest, draftDigest, buildContextBlock, buildDigestPrompt, digestToMarkdown } from "../lib/digest.mjs";
 import { revisionMtime } from "../lib/record-index.mjs";
 import { requestKind } from "../lib/context-routes.mjs";
 
@@ -110,6 +110,14 @@ test("model JSON is extracted from fences and prose", () => {
   assert.deepEqual(extractJson('here:\n```json\n{"a":{"b":"}"}}\n```'), { a: { b: "}" } });
   assert.deepEqual(extractJson('prefix {"x":1} suffix'), { x: 1 });
   assert.equal(extractJson("no json"), undefined);
+});
+
+test("the report contract asks for complete explanations with evidence, not terse labels", () => {
+  assert.match(DIGEST_SYSTEM, /do not reduce a project to its session titles/);
+  assert.match(DIGEST_SYSTEM, /full sentence with the change or outcome and its evidence/);
+  assert.match(DIGEST_SYSTEM, /3-6 sentences/);
+  assert.match(DIGEST_SYSTEM, /Do not pad/);
+  assert.doesNotMatch(DIGEST_SYSTEM, /Be concise and concrete/);
 });
 
 test("digest output is validated and unknown session ids dropped", () => {

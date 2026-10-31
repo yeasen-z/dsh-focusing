@@ -22,6 +22,26 @@ test("the shipped templates come first and cannot be changed", async () => {
   assert.equal(list.find(t => t.id === "builtin:handoff").needsSession, true);
 });
 
+test("the shipped reports ask for outcomes, evidence and useful detail", () => {
+  const weekly = BUILTIN_TEMPLATES.find(t => t.id === "builtin:weekly");
+  const daily = BUILTIN_TEMPLATES.find(t => t.id === "builtin:daily");
+  const handoff = BUILTIN_TEMPLATES.find(t => t.id === "builtin:handoff");
+  assert.match(weekly.instruction, /实际改动/);
+  assert.match(weekly.instruction, /验证情况/);
+  assert.match(weekly.instruction, /遗留问题/);
+  assert.match(weekly.instruction, /不要只罗列会话标题/);
+  assert.match(weekly.instructionEn, /concrete changes/);
+  assert.match(daily.instruction, /失败、阻塞或未验证/);
+  assert.match(daily.instruction, /关键改动/);
+  assert.match(daily.instructionEn, /verification results/);
+  assert.match(handoff.instruction, /sections/);
+  assert.match(handoff.instruction, /关键决策及原因/);
+  assert.match(handoff.instruction, /关键文件及各自作用/);
+  assert.match(handoff.instruction, /验证情况与证据/);
+  assert.match(handoff.instruction, /不要把计划写成已完成/);
+  assert.match(handoff.instructionEn, /Separate verified facts from uncertain judgments/);
+});
+
 test("a template of your own is saved, survives a restart, and can be edited and deleted", async () => {
   const file = join(dir, "b.json");
   const one = createTemplateStore({ file });
