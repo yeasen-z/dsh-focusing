@@ -15,7 +15,7 @@ Focusing 是 DeepSeek Harness（DSH）的上下文工作台，把 DSH 会话和�
 |---|---|
 | 看最近在做哪些项目、回到已有问答或报告 | **工作台** |
 | 问“上周做了什么”“某个问题最后怎么解决的” | **问答** |
-| 按时间和项目浏览请求、改动、结论与待办 | **上下文记录** |
+| 按工作区和来源浏览会话，接着之前的上下文继续 | **上下文记录** |
 | 生成周报、日报，保存自己的报告模板 | **整理与报告** |
 | 对照几个会话的经验，讨论后生成交接简报 | **协作室** |
 | 检查一个会话是否原地打转、查看分析记录 | **专注纠偏** |
@@ -83,11 +83,15 @@ Focusing 是 DeepSeek Harness（DSH）的上下文工作台，把 DSH 会话和�
 
 ## 上下文记录与专注纠偏
 
-### 上下文记录：从报告回到材料
+### 上下文记录：按工作区回到材料，接着继续
 
-按时间、项目和关键词浏览会话，展开请求、阶段结论、识别到的文件改动、命令和待办；也可从单个会话生成交接。DSH 与已启用导入的 Codex 使用统一读取入口，Codex 标记为只读。
+顶部是时间跨度（今天、本周、上周、本月、最近 30 天、**全部**）和关键词搜索，其下用 **DSH / Codex** 切换来源（各自显示会话数）；再往下每个**工作区一条横栏**，标出目录名、完整路径、会话数和最近活动，点开横栏列出该目录下的会话，点会话展开请求、阶段结论、识别到的文件改动和待办。记录卡片只标 `DSH` 或 `Codex` 来源，不再堆叠工作区标签。
 
-列表和详情使用折叠记录，请求与回复有长度限制。需要核对更长的消息或工具输出时，历史问答可以读取原始事件；文件和命令识别仍取决于工具事件格式。
+- **DSH 会话**提供「继续上下文对话」：由 Host 复制该会话并打开副本，原会话不动，新会话保留全部上下文。
+- **Codex 会话**只读，提供「在 DSH 中继续」：在该工作目录新开一个 DSH 会话，由你接手。
+- 也可从单个会话生成交接文档；DSH 与已启用导入的 Codex 使用统一读取入口。
+
+列表由持久索引驱动：每个会话只整理一次，文件没变就直接复用，重启后不再重扫全部记录；范围统计仍只计算所选时间跨度内的轮次。需要核对更长的消息或工具输出时，历史问答可以读取原始事件。
 
 ### 专注纠偏：观察重复尝试，按需分析
 
@@ -144,6 +148,8 @@ npm pack
 
 插件模型设置不替换普通 DSH 聊天选择的模型。保存设置不会自动分析内容；连接测试只发送探测文本。专注分析可预览将发送的提示词与材料，API Key 留在 Host，页面只收到是否已配置的标记。
 
+模型 id 可能本身带斜杠（如 `copilot/auto`），选择器按第一个斜杠拆分，不会截断。已保存但供应商不再提供的模型会在启动、打开模型列表或保存设置时自动修复：能唯一补全的就补全，否则清空该选项、回落到「跟随 DSH 当前默认模型」，避免每次调用都报 `UNKNOWN_MODEL`。
+
 ## 查询机制与当前边界
 
 当前历史问答由插件内部维护消息和只读工具循环，不创建 DSH 会话，也不向其他会话注册工具。它与报告共享上下文读取层，但采用按需查询方式：
@@ -177,13 +183,15 @@ npm pack
 | `dsh-focusing.rooms.json` | 协作室快照、讨论与简报 |
 | `dsh-focusing.reviews.json` | 单会话分析历史 |
 | `dsh-focusing.codex-index.json` | Codex 索引缓存 |
+| `dsh-focusing.activity-index.json` | 活动日历的每日时间线缓存（只含计数与时间，不含对话文本） |
+| `dsh-focusing.records-index.json` | 上下文记录的持久索引（每个会话的列表行，按文件修订增量更新） |
 
 | 模块 | 代码入口 |
 |---|---|
 | Host / UI | `lib/index.mjs`、`lib/client.js` |
 | 读取、折叠、索引 | `lib/context-source.mjs`、`lib/context-records.mjs`、`lib/record-index.mjs` |
 | Codex 导入 | `lib/codex-rollout.mjs`、`lib/codex-index.mjs` |
-| 历史问答 | `lib/ask.mjs`、`lib/ask-store.mjs`、`lib/context-tools.mjs` |
+| 历史问答 | `lib/ask.mjs`、`lib/ask-store.mjs`、`lib/context-tools.mjs`、`lib/native-ask-routes.mjs`、`lib/focusing-session-store.mjs` |
 | 模板与报告 | `lib/template-store.mjs`、`lib/digest.mjs`、`lib/digest-store.mjs`、`lib/context-routes.mjs` |
 | 活动与时间 | `lib/activity.mjs`、`lib/time-range.mjs` |
 | 协作室 | `lib/room.mjs`、`lib/room-routes.mjs` |
