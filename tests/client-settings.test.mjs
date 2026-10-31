@@ -198,6 +198,25 @@ test("a silent provider is named, not just an empty dropdown", () => {
   assert.ok(all.includes("RouterLink") && all.includes("ACCOUNT_SIGN_IN_REQUIRED"), "a provider error is shown verbatim");
 });
 
+test("a model id that contains a slash survives the picker", () => {
+  const { render } = load();
+  const models = [
+    { provider: "magpie", id: "copilot/auto", name: "Auto", providerName: "Magpie" },
+    { provider: "deepseek", id: "chat", name: "DeepSeek Chat", providerName: "DeepSeek" },
+  ];
+  const tree = render(set({ models, saved: { ...settings, provider: "magpie", model: "copilot/auto" } }));
+  const select = find(tree, n => n.type === "select" && find(n, o => o.type === "option" && o.props?.value === "magpie/copilot/auto").length)[0];
+  assert.ok(select, "the model is offered by its full id");
+  assert.equal(select.props.value, "magpie/copilot/auto", "and the field shows it selected");
+
+  // Choosing it must not split the model at its inner slash.
+  const states = set({ models, saved: { ...settings, provider: "", model: "" } });
+  const fresh = render(states);
+  const picker = find(fresh, n => n.type === "select" && find(n, o => o.type === "option" && o.props?.value === "magpie/copilot/auto").length)[0];
+  picker.props.onChange({ target: { value: "magpie/copilot/auto" } });
+  assert.deepEqual([states[3].provider, states[3].model], ["magpie", "copilot/auto"], "provider and the whole model id are kept");
+});
+
 test("focusing a field cannot repaint it in any stylesheet", () => {
   // The three stylesheets (workbench .fw, settings .fws, focus guard .fz) each
   // used to draw an accent outline on a focused field. A field must look the

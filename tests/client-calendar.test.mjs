@@ -60,8 +60,26 @@ test("the year fits the card: no horizontal bar, and columns are sized to the wi
   const grid = rule(".fw-cal-grid");
   assert.match(grid, /grid-auto-columns:var\(--calw/, "columns come from the measured width");
   assert.match(grid, /grid-template-rows:repeat\(7,var\(--calw/, "rows match the columns, so cells stay square");
+  assert.match(grid, /gap:var\(--calgap/, "the gap can shrink with narrow cards");
+  assert.match(SOURCE, /gap:var\(--calgap,3px\)\}\.fw-cal-grid\.loading/, "the grid rule is closed before the loading rule");
+  assert.match(SOURCE, /setProperty\('--calgap'/, "the measured layout also sizes its gaps");
+  assert.match(SOURCE, /Math\.min\(13,Math\.max\(0,/, "tiny cards can shrink cells below 3px instead of overflowing");
   assert.match(SOURCE, /setProperty\('--calw'/, "and the component really measures the card");
   assert.match(SOURCE, /new ResizeObserver\(fit\)/, "refitting when the card changes width");
+  assert.match(SOURCE, /\},\[weeks\]\);/, "refitting when loading placeholders become real days");
+  assert.match(rule(".fw-cal-scroll"), /container-type:inline-size/, "fallback cell sizes use the calendar's own width");
+});
+
+test("loading placeholders fit the card before the activity request finishes", async () => {
+  const { render } = await mount(calendar());
+  const tree = render([null, "", false, 0]);
+  const wrap = find(tree, n => n.props?.className === "fw-cal-grid-wrap")[0];
+  const months = find(wrap, n => n.props?.className === "fw-cal-months")[0];
+  const grid = find(wrap, n => String(n.props?.className).includes("fw-cal-grid loading"))[0];
+  assert.equal(grid.children.length, 365);
+  assert.match(months.props.style.gridTemplateColumns, /repeat\(53,/, "365 placeholders reserve 53 weeks before data arrives");
+  assert.equal(wrap.props.style["--calw"], "min(13px,calc(100cqi / 53))");
+  assert.equal(wrap.props.style["--calgap"], "0px", "initial cells leave no gap that could push the last week outside");
 });
 
 test("every day is one square, levelled, with a tooltip that says what happened", async () => {

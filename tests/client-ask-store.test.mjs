@@ -127,13 +127,15 @@ test("stop keeps the conversation; delete removes it here and on the Host", asyn
   leave();
 });
 
-test("a question the Host refuses is shown as failed, and does not become the open conversation", async () => {
+test("a question the Host refuses is shown as failed, stays open, and keeps the typed text", async () => {
   const { store } = load(() => ({ ok: false, reason: "busy" }));
   const leave = store.subscribe(() => {});
   await tick(10);
-  await store.send("q");
+  const sent = await store.send("q");
+  assert.equal(sent, false, "the caller learns the send did not happen");
   assert.equal(store.get()[0].status, "failed");
   assert.equal(store.get()[0].detail, "busy");
   assert.equal(store.get()[0].messages[0].content[0].text, "q", "what was typed is still shown");
+  assert.equal(store.active()?.id, store.get()[0].id, "a refused turn stays on screen instead of a blank new chat");
   leave();
 });

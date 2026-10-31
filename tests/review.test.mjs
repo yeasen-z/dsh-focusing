@@ -11,6 +11,7 @@ import {
   OUTPUT_CONTRACT,
   finishReview,
   readCompletionText,
+  repairModelRoute,
 } from "../lib/review.mjs";
 import { normalizeSettings, DEFAULT_SETTINGS, settingsProblem, mergeSettings } from "../lib/settings.mjs";
 
@@ -333,4 +334,15 @@ test("readCompletionText accepts string and block-array content", () => {
   assert.equal(readCompletionText({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }] }).text, "ok");
   assert.equal(readCompletionText({ choices: [{ message: { content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] } }] }).text, "ab");
   assert.equal(readCompletionText({}).text, "");
+});
+
+test("a model id truncated at its first slash is repaired, not sent as-is", async () => {
+  const llm = { listModels: async provider => (provider === "magpie" ? [{ id: "copilot/auto" }, { id: "codex/gpt-6-sol" }] : []) };
+  assert.deepEqual(await repairModelRoute(llm, { provider: "magpie", model: "copilot" }), { model: "copilot/auto" }, "the truncated id resolves to the one model it started");
+  assert.deepEqual(await repairModelRoute(llm, { provider: "magpie", model: "codex" }), { model: "codex/gpt-6-sol" });
+  assert.equal(await repairModelRoute(llm, { provider: "magpie", model: "copilot/auto" }), undefined, "a correct id is left alone");
+  assert.deepEqual(await repairModelRoute(llm, { provider: "magpie", model: "nope" }), { provider: "", model: "" }, "a model the provider cannot serve is dropped, so the DSH default takes over");
+  assert.equal(await repairModelRoute({ listModels: async () => [] }, { provider: "p", model: "m" }), undefined, "an empty catalogue is not proof the model is gone");
+  assert.equal(await repairModelRoute({ listModels: async () => { throw new Error("down"); } }, { provider: "p", model: "m" }), undefined, "a broken catalogue repairs nothing");
+  assert.equal(await repairModelRoute(llm, { provider: "", model: "" }), undefined);
 });

@@ -6,9 +6,9 @@ import fs from "node:fs";
 
 const SOURCE = fs.readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
 
-function load() {
+function load({ uiWorkspace, storage } = {}) {
   let captured;
-  globalThis.window = { __ModuleLoader__: { load: d => { captured = d; } } };
+  globalThis.window = { __ModuleLoader__: { load: d => { captured = d; } }, sessionStorage: storage };
   globalThis.fetch ??= async () => ({ ok: true, json: async () => ({}) });
   new Function(SOURCE)();
   let states = [];
@@ -23,20 +23,20 @@ function load() {
   };
   const api = captured.factory(n => { if (n === "react") return React; throw new Error(n); });
   const dict = {};
-  let Workbench;
+  let Workbench, injected;
   api.apply({
     locale: { bind: () => k => dict[k] ?? k, register: (ns, l, table) => { if (l === "zh") Object.assign(dict, table); return () => {}; }, subscribe: () => () => {} },
-    effect: fn => fn(), get: () => undefined,
-    slots: { inject: (n, fn) => fn(), register: (o, c) => { if (o.name === "focusing.panel.body") Workbench = c; return () => {}; } },
+    effect: fn => fn(), get: n => n === 'uiWorkspace' ? uiWorkspace : undefined,
+    slots: { inject: (n, fn) => fn(), register: (o, c) => { if (o.name === "focusing.panel.body") { Workbench = c; injected = o.inject?.(); } return () => {}; } },
   });
   const render = (preset) => {
     // A copy: an async setState left over from an earlier test must not write
     // back into the shared preset array.
     states = preset ? [...preset] : []; index = 0;
-    return Workbench({ t: k => dict[k] ?? k, subscribeLocale: () => () => {}, openSession: () => {} });
+    return Workbench({ ...injected, t: k => dict[k] ?? k, subscribeLocale: () => () => {}, openSession: () => {} });
   };
   // The page the Workbench would show next: state 1 is `view`.
-  const rerender = () => { index = 0; return Workbench({ t: k => dict[k] ?? k, subscribeLocale: () => () => {}, openSession: () => {} }); };
+  const rerender = () => { index = 0; return Workbench({ ...injected, t: k => dict[k] ?? k, subscribeLocale: () => () => {}, openSession: () => {} }); };
   const seedTemplates = list => Workbench.tplSeed(list);
   return { render, rerender, dict, store: Workbench.askStore, seedTemplates, view: () => states[1] };
 }
@@ -148,6 +148,29 @@ test("the conversation list stays in the sidebar on every page", () => {
   }
 });
 
+test("the Ask nav entry always starts fresh, then the created conversation row is selected", async () => {
+  const env = load();
+  env.store.seed([{ id: "a", title: "已有话题", status: "idle", messages: [user("已有话题")], steps: [] }]);
+  env.store.pick("a");
+  let tree = env.render([0, "records", null, null, "", [], "", "", null]);
+  const askNav = find(tree, n => n.props?.className === "fw-nav-item" && n.props?.title === env.dict.wb_ask)[0];
+  askNav.props.onClick();
+  assert.equal(env.view(), "ask");
+  assert.equal(env.store.active(), undefined, "Ask opens the new-conversation page");
+
+  tree = env.render([0, "ask", null, null, "", [], "", "", null]);
+  const selectedNav = find(tree, n => String(n.props?.className ?? "").includes("fw-nav-item active"));
+  assert.ok(selectedNav.some(n => n.props.title === env.dict.wb_ask), "Ask is selected before sending");
+
+  env.store.seed([{ id: "new", title: "刚发送的话题", status: "idle", messages: [user("刚发送的话题")], steps: [] }]);
+  env.store.pick("new");
+  tree = env.render([0, "ask", null, null, "", [], "", "", null]);
+  const askAfter = find(tree, n => n.props?.title === env.dict.wb_ask && String(n.props?.className ?? "").startsWith("fw-nav-item"))[0];
+  assert.ok(!String(askAfter.props.className).includes("active"), "Ask is no longer selected once a thread exists");
+  const row = find(tree, n => n.props?.title === "刚发送的话题" && /^fw-nav-chat/.test(String(n.props?.className ?? "")))[0];
+  assert.equal(row.props["aria-selected"], true, "the conversation row becomes selected");
+});
+
 test("picking a conversation from another page opens it", () => {
   const env = load();
   const { dict } = env;
@@ -175,7 +198,9 @@ test("many conversations are grouped by day, each group shows a few, and folding
   const env = load();
   const { render, dict } = env;
   const day = 864e5;
-  const now = Date.now();
+  // Anchored at local noon, so a run just after midnight cannot push the
+  // "today" rows into yesterday and flip the counts.
+  const now = (() => { const d = new Date(); d.setHours(12, 0, 0, 0); return d.getTime(); })();
   const many = [];
   for (let i = 0; i < 12; i++) many.push({ id: `t${i}`, title: `今天 ${i}`, status: "idle", messages: [user(`t${i}`)], steps: [], updatedAt: now - i * 6e4 });
   for (let i = 0; i < 10; i++) many.push({ id: `y${i}`, title: `昨天 ${i}`, status: "idle", messages: [user(`y${i}`)], steps: [], updatedAt: now - day - i * 6e4 });
@@ -220,7 +245,12 @@ test("the thread header keeps the title and delete, without a second list", () =
   const tree = render([0, "ask", null, null, "", [], "", "", null]);
   const head = find(tree, n => n.props?.className === "fw-chat-head")[0];
   assert.ok(text(head).includes("第一个话题"), "the open chat is named");
-  assert.equal(find(head, n => n.type === "button" && text(n) === dict.askDelete).length, 1, "delete offers itself once");
+  const remove = find(head, n => n.type === "button" && text(n) === dict.askDelete);
+  assert.equal(remove.length, 1, "delete offers itself once");
+  assert.equal(find(head, n => n.type === "button" && [dict.askArchive, dict.askUnarchive].includes(text(n))).length, 0, "archive is not duplicated in the Ask header");
+  remove[0].props.onClick();
+  assert.equal(env.store.active(), undefined, "delete immediately closes the open thread");
+  assert.match(/\.fw-chat-head\{[^}]*-webkit-app-region:no-drag/.exec(SOURCE)?.[0] ?? "", /no-drag/, "window dragging cannot swallow the delete click");
   // The narrow-panel select stays in the tree but is not a second visible list.
   assert.equal(find(head, n => n.type === "button" && /^fw-nav-chat/.test(String(n.props?.className ?? ""))).length, 0);
 });
@@ -267,13 +297,114 @@ test("a running digest shows its stages", () => {
 
 test("records and digests views render lists", () => {
   const { render } = load();
-  const rec = { id: "s1", title: "修复登录", project: "app", gist: "g", turns: 2, calls: 5, todosDone: 1, todosTotal: 2, lastAt: Date.now() };
+  const rec = { id: "s1", title: "修复登录", cwd: "/w/app", project: "app", gist: "g", turns: 2, calls: 5, todosDone: 1, todosTotal: 2, lastAt: Date.now() };
   const states = [0, "records", null, null, "", [], "", "", null, "", false, "", "this-week", "", "", ["/w/app"], { ok: true, records: [rec], stats: { sessions: 1, turns: 2, calls: 5 }, range: { label: "本周", from: "a", to: "b" }, projects: ["app"], workspaces: ["/w/app"] }, ""];
   const renderedRecords = render(states);
   assert.ok(text(renderedRecords).includes("修复登录"));
-  assert.ok(find(renderedRecords, n => String(n.props?.className||'').includes('fw-workspace-tag')).length > 0, "workspace tags are available");
   const all = text(render([0, "digests", null, null, "", [{ id: "d1", title: "本周工作整理", kind: "weekly", range: { label: "本周" }, createdAt: Date.now() }], "", "", null]));
   assert.ok(all.includes("本周工作整理"));
+});
+
+test("records are a source switch over workspace bars, and a bar unfolds its sessions", () => {
+  const env = load();
+  const { render, rerender, dict } = env;
+  const now = Date.now();
+  const dsh = { id: "s1", title: "修复登录", cwd: "/w/app", gist: "g", turns: 2, calls: 5, lastAt: now };
+  const docs = { id: "s2", title: "写文档", cwd: "/w/docs", gist: "d", turns: 1, calls: 2, lastAt: now - 1000 };
+  const codex = { id: "codex:1", source: "codex", title: "旧 Codex 会话", cwd: "/w/app", gist: "c", turns: 3, calls: 7, lastAt: now - 2000 };
+  const records = { ok: true, records: [dsh, docs, codex], stats: { sessions: 3, turns: 6, calls: 14 }, range: { label: "本周", from: "a", to: "b" }, projects: ["app"], workspaces: ["/w/app", "/w/docs"] };
+  const states = [0, "records", null, null, "", [], "", "", null, "", false, "", "this-week", "", "", "", records, ""];
+
+  const tree = render(states);
+  const bars = find(tree, n => n.props?.className === "fw-ws-head");
+  assert.equal(bars.length, 2, "one bar per DSH working directory; Codex is not mixed in");
+  assert.ok(text(bars[0]).includes("/w/app"), "the bar carries the working directory");
+  assert.equal(find(tree, n => String(n.props?.className || "").includes("fw-workspace-tag")).length, 0, "a record carries no workspace tag of its own");
+  const pills = find(tree, n => n.props?.className === "fw-pill gray").map(text);
+  assert.ok(pills.includes("DSH"), "the record is labelled by source");
+  assert.ok(!text(tree).includes("旧 Codex 会话"), "the other source is not listed until it is chosen");
+
+  // Choosing Codex keeps the same shape, with the imported sessions in it.
+  const codexTab = find(tree, n => n.type === "button" && String(n.props?.className || "").startsWith("fw-src") && text(n).includes(dict.wb_sourceCodex))[0];
+  codexTab.props.onClick();
+  const imported = env.rerender();
+  assert.ok(text(imported).includes("旧 Codex 会话"));
+  assert.ok(!text(imported).includes("写文档"), "only the chosen source is listed");
+
+  // The first bar is open with its sessions; folding it hides them.
+  const openedRows = find(imported, n => n.props?.className === "fw-rec");
+  assert.equal(openedRows.length, 1, "the first workspace starts unfolded");
+  find(imported, n => n.props?.className === "fw-ws-head")[0].props.onClick();
+  assert.equal(find(rerender(), n => n.props?.className === "fw-rec").length, 0, "clicking the bar folds its sessions away");
+});
+
+test("the records spans end with 全部, and choosing it is the selected span", () => {
+  const env = load();
+  const { dict } = env;
+  const rec = { id: "s1", title: "很久以前的会话", cwd: "/w/app", gist: "g", turns: 1, calls: 1, lastAt: Date.now() };
+  const records = { ok: true, records: [rec], stats: { sessions: 1, turns: 1, calls: 1 }, range: { key: "this-week", label: "本周", from: "2026-10-26", to: "2026-10-27" }, projects: [], workspaces: ["/w/app"] };
+  const tree = env.render([0, "records", null, null, "", [], "", "", null, "", false, "", "this-week", "", "", "", records, ""]);
+  const spans = find(tree, n => /^fw-seg/.test(String(n.props?.className || ""))).map(text);
+  assert.ok(spans.includes(dict.r_all), "the widest span is offered next to the others");
+  assert.equal(spans.at(-1), dict.r_all, "and it comes last");
+  const allBtn = find(tree, n => n.type === "button" && text(n) === dict.r_all)[0];
+  allBtn.props.onClick();
+  const after = env.rerender();
+  assert.ok(find(after, n => text(n) === dict.r_all && /fw-seg on/.test(String(n.props?.className || ""))).length, "it becomes the selected span");
+});
+
+test("the records page draws the last list at once, before the request returns", () => {
+  const stored = new Map();
+  const storage = { getItem: k => (stored.has(k) ? stored.get(k) : null), setItem: (k, v) => stored.set(k, v), removeItem: k => stored.delete(k) };
+  const payload = {
+    ok: true,
+    records: [{ id: "s1", title: "缓存里的会话", cwd: "/w/app", gist: "g", turns: 1, calls: 1, lastAt: Date.now() }],
+    stats: { sessions: 1, turns: 1, calls: 1 },
+    range: { key: "this-week", label: "本周", from: "2026-10-26", to: "2026-10-27" },
+    projects: [], workspaces: ["/w/app"],
+  };
+  storage.setItem("dsh-focusing.records.v1", JSON.stringify({ range: "this-week", data: payload }));
+  const env = load({ storage });
+  // State up to the records slot: the list itself is not seeded.
+  const tree = env.render([0, "records", null, null, "", [], "", "", null, "", false, "", "this-week", "", "", ""]);
+  assert.ok(text(tree).includes("缓存里的会话"), "the rows are there without waiting for the Host");
+  assert.equal(find(tree, n => n.props?.className === "fw-ws-head").length, 1, "and they are grouped like a fresh answer");
+});
+
+test("a DSH record continues as a copied session; a Codex record opens a draft in DSH", async () => {
+  const env = load({ uiWorkspace: {
+    forkSession: async id => { env.forked.push(id); return "child"; },
+    openSession: id => env.forked.push(`open:${id}`),
+    startSession: (workspace, options) => env.drafts.push({ workspace, options }),
+  } });
+  env.forked = []; env.drafts = [];
+  const { dict } = env;
+  const dsh = { id: "s1", title: "修复登录", cwd: "/w/app", gist: "g", turns: 2, calls: 5, lastAt: Date.now() };
+  const codex = { id: "codex:1", source: "codex", title: "旧 Codex 会话", cwd: "/w/app", gist: "c", turns: 3, calls: 7, lastAt: Date.now() - 1000 };
+  const records = { ok: true, records: [dsh, codex], stats: { sessions: 2, turns: 5, calls: 12 }, range: { label: "本周", from: "a", to: "b" }, projects: [], workspaces: ["/w/app"] };
+  const detail = { requests: [{ text: "修一下登录" }], lastReply: "改好了", files: [], todos: [] };
+  const stateFor = id => [0, "records", null, null, "", [], "", "", null, "", false, "", "this-week", "", "", "", records, "", id, detail];
+
+  const dshView = env.render(stateFor("s1"));
+  const copy = find(dshView, n => n.type === "button" && text(n) === dict.wb_continueContext);
+  assert.equal(copy.length, 1, "a DSH session offers the exact continuation label");
+  copy[0].props.onClick();
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(env.forked, ["s1", "open:child"], "the Host copies the session and the copy is opened");
+
+  const codexView = (() => {
+    const first = env.render(stateFor("codex:1"));
+    find(first, n => n.type === "button" && String(n.props?.className || "").startsWith("fw-src") && text(n).includes(dict.wb_sourceCodex))[0].props.onClick();
+    const switched = env.rerender();
+    find(switched, n => n.props?.className === "fw-rec-btn")[0].props.onClick();
+    return env.rerender();
+  })();
+  const carry = find(codexView, n => n.type === "button" && text(n) === dict.wb_continueCodex);
+  assert.equal(carry.length, 1, "a Codex session offers its own label");
+  carry[0].props.onClick();
+  assert.equal(env.drafts.length, 1);
+  assert.equal(env.drafts[0].workspace, "/w/app", "the new DSH chat starts in the same working directory");
+  assert.equal(find(codexView, n => n.type === "button" && text(n) === dict.wb_continueContext).length, 0, "a Codex session is never forked");
 });
 
 // Room states start at index 24: rooms, roomId, room, roomErr, form, pickList, modelList, sayText, roomBusy.
@@ -340,6 +471,26 @@ test("the footer is two plain text lines; the one gear that opens settings sits 
 });
 
 
+test("the sidebar leaves the layout completely and becomes a drawer", () => {
+  const narrow = /@container\(max-width:760px\)\{\.fw\{[^\n]*/.exec(SOURCE)?.[0] ?? "";
+  assert.match(narrow, /\.fw\{display:block\}/, "narrow widths stop reserving a sidebar grid column");
+  assert.match(narrow, /\.fw-main\{height:100%;width:100%;scrollbar-gutter:auto\}/, "content consumes the full width without a gutter");
+  assert.match(narrow, /\.fw-nav\{position:absolute/, "the navigation becomes an overlay drawer");
+  assert.match(narrow, /transform:translateX\(-102%\)/, "the closed drawer moves fully off screen");
+  assert.match(narrow, /\.fw\.nav-open \.fw-nav\{transform:none;visibility:visible\}/, "opening restores the whole sidebar");
+  assert.match(narrow, /\.fw-menu\{display:flex/, "a menu button remains available");
+  assert.doesNotMatch(SOURCE, /grid-template-columns:56px/, "there is no awkward intermediate icon rail");
+  assert.match(SOURCE, /\.fw-focus\{[^}]*container-type:inline-size/, "the outer wrapper owns the query container");
+  assert.doesNotMatch(/\.fw\{[^}]*\}/.exec(SOURCE)?.[0] ?? "", /container-type/, "the queried layout must not be its own container");
+});
+
+test("the page restores a native draggable title strip", () => {
+  assert.match(SOURCE, /\.fw-drag-strip\{[^}]*-webkit-app-region:drag/, "the upper empty strip can drag and double-click the native window");
+  assert.match(SOURCE, /className:'fw-drag-strip'/, "the strip is rendered by the workbench");
+  assert.match(SOURCE, /\.fw-menu\{[^}]*-webkit-app-region:no-drag/, "the menu remains clickable over that strip");
+  assert.match(SOURCE, /\.fw button,\.fw input,\.fw textarea,\.fw select,\.fw a\{[^}]*z-index:9;[^}]*-webkit-app-region:no-drag/, "every interactive control stays above and outside the drag region");
+});
+
 test("the top bar keeps the gear on the name's row; the sheet never lets it wrap under", () => {
   // The markup was right but the rules were missing once: without them the gear
   // fell to its own line and sat misaligned. Both halves are pinned here.
@@ -351,10 +502,8 @@ test("the top bar keeps the gear on the name's row; the sheet never lets it wrap
   assert.match(bar, /align-items:center/);
   assert.ok(!/flex-wrap:wrap/.test(bar), "the gear never wraps onto its own line");
   assert.match(rule(".fw-gear"), /flex:0 0 auto/, "and cannot be squeezed out of the row");
-  // A narrow sidebar stacks them on purpose, centred -- not a broken wrap.
-  const compact = /@container\(max-width:820px\)\{[^\n]*/.exec(SOURCE)?.[0] ?? "";
-  assert.match(compact, /\.fw-brandbar\{flex-direction:column/, "narrow: a deliberate stack");
-  assert.match(compact, /\.fw-brand\{justify-content:center;padding:0\}/, "with no stray gap under the name");
+  const narrow = /@container\(max-width:760px\)\{\.fw\{[^\n]*/.exec(SOURCE)?.[0] ?? "";
+  assert.ok(!/\.fw-brandbar\{flex-direction:column/.test(narrow), "the drawer keeps the full horizontal header");
 });
 
 test("the Codex line reads set up or not set up; the count and folder are in the hover text", () => {
@@ -474,9 +623,8 @@ test("on a narrow panel the chat list gives way to a drop-down, and the sheet sa
   assert.equal(env.store.activeId(), "b");
   select.props.onChange({ target: { value: "" } });
   assert.equal(env.store.active(), undefined, "the first entry starts a new chat");
-  const compact = /@container\(max-width:820px\)\{[^\n]*/.exec(SOURCE)?.[0] ?? "";
-  assert.match(compact, /\.fw-nav-chats\{display:none\}/, "a 56px rail cannot hold the list");
-  assert.match(compact, /\.fw-chat-pick\{display:block\}/, "so the header takes over");
+  const narrow = /@container\(max-width:760px\)\{\.fw\{[^\n]*/.exec(SOURCE)?.[0] ?? "";
+  assert.ok(!/\.fw-nav-chats\{display:none\}/.test(narrow), "the overlay drawer keeps the full conversation list");
 });
 
 test("the running spinner stays small enough for a 12px row", () => {

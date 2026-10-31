@@ -78,6 +78,26 @@ test("records can filter by multiple workspace paths, with an empty filter meani
   assert.deepEqual(all.records.map(r => r.title), ["recent work"]);
 });
 
+test("the records list is drawn from the index, counting only the turns inside the span", async () => {
+  const h = setup("ok");
+  const week = await h.call("/api/dsh-focusing.records?range=last-7d&offset=480");
+  assert.deepEqual(week.records.map(r => r.title), ["recent work"]);
+  assert.equal(week.records[0].turns, 1, "the one turn inside the span");
+  assert.equal(week.records[0].calls, 1);
+  assert.ok(week.records[0].cwd === "/w/p", "the row carries the working directory the bars group by");
+  assert.equal(week.stats.sessions, 1);
+
+  const allSpan = await h.call("/api/dsh-focusing.records?range=all&offset=480");
+  assert.deepEqual(allSpan.records.map(r => r.title), ["recent work", "old work"], "all time reaches the oldest session too");
+  assert.equal(allSpan.stats.sessions, 2);
+  assert.ok(allSpan.records.every(r => r.lastAt > 0 && typeof r.gist === "string"));
+
+  // Asking again is answered from the index: no transcript is folded twice.
+  const before = h.reads.length;
+  await h.call("/api/dsh-focusing.records?range=all&offset=480");
+  assert.equal(h.reads.length, before, "an unchanged session is not read again");
+});
+
 test("records for this week skip old sessions without reading them", async () => {
   const h = setup("{}");
   const body = await h.call("/api/dsh-focusing.records?range=last-7d&offset=480");

@@ -28,6 +28,15 @@ test("last week and yesterday are closed ranges", () => {
   assert.equal(y.to, "2026-10-26");
 });
 
+test("all time is a range like any other, with no lower bound", () => {
+  const all = resolveRange("all", { now: NOW, offsetMin: OFF, locale: "zh" });
+  assert.equal(all.key, "all");
+  assert.equal(all.start, 0, "nothing is left out");
+  assert.equal(all.label, "全部");
+  assert.equal(all.to, "2026-10-27");
+  assert.equal(resolveRange("all", { now: NOW, offsetMin: OFF, locale: "en" }).label, "All");
+});
+
 test("the range is inferred from the request words", () => {
   assert.equal(inferRangeKey("整理我这周干了什么，进度如何"), "this-week");
   assert.equal(inferRangeKey("总结今天各会话的进展"), "today");
