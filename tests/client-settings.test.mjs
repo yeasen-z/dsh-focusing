@@ -139,7 +139,7 @@ test("the focus-guard prompt and content switches share the same dialog", () => 
   assert.equal(textarea.props.value, "You are a careful reviewer.", "the persona is editable here");
   assert.equal(find(tree, n => n.props?.type === "checkbox").length, 4, "four content switches");
   const tabs = find(tree, n => n.props?.role === "tab").map(deep);
-  assert.deepEqual(tabs, [dict.settingsTabModel, dict.settingsTabFocus, dict.settingsTabSources]);
+  assert.deepEqual(tabs, [dict.settingsTabModel, dict.settingsTabFocus, dict.settingsTabSources, dict.settingsTabInterface]);
 });
 
 test("the sources tab holds the archived switch and the Codex import", () => {
@@ -156,6 +156,24 @@ test("the sources tab holds the archived switch and the Codex import", () => {
   const manual = render(set({ tab: "sources", saved: { ...settings, codexEnabled: true, codexPathMode: "manual", codexPath: "~/x" } }));
   const input = find(manual, n => n.props?.["aria-label"] === dict.codexPath)[0];
   assert.equal(input.props.value, "~/x", "a manual path is typed in");
+});
+
+test("Claude Code import has independent discovery and manual path controls", () => {
+  const { render, dict } = load();
+  const switchIn = (tree, label) => find(tree, n => n.type === "label" && text(n).includes(label))[0];
+  const box = (tree, label) => find(switchIn(tree, label), n => n.props?.type === "checkbox")[0];
+  const off = render(set({ tab: "sources" }));
+  assert.equal(box(off, dict.claudeEnable).props.checked, false);
+  assert.equal(box(off, dict.codexEnable).props.checked, false, "Claude and Codex are independent opt-ins");
+  assert.ok(!text(off).includes(dict.claudeAutoHint));
+
+  const on = render(set({ tab: "sources", saved: { ...settings, claudeEnabled: true, claudePathMode: "auto" } }));
+  assert.ok(text(on).includes(dict.claudeAutoHint));
+  assert.equal(find(on, n => n.props?.["aria-label"] === dict.claudePath).length, 0);
+  const manual = render(set({ tab: "sources", saved: { ...settings, claudeEnabled: true, claudePathMode: "manual", claudePath: "~/.claude-work" } }));
+  const input = find(manual, n => n.props?.["aria-label"] === dict.claudePath)[0];
+  assert.equal(input.props.value, "~/.claude-work");
+  assert.equal(input.props.placeholder, "~/.claude");
 });
 
 test("the connection test reports success and failure in place", async () => {

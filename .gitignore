@@ -1,3 +1,6 @@
+# Local dependency installation used to refresh vendored browser runtime
+/node_modules/
+
 # npm package archives
 *.tgz
 

@@ -169,6 +169,16 @@ test("filters and the expanded record survive a remount", () => {
   app.restore();
 });
 
+test("the selected record tag scope survives a remount", () => {
+  const store = session();
+  store.setItem("dsh-focusing.page", JSON.stringify({ view: "records", recTags: ["source:claude", "workspace:/w/app"] }));
+  const app = mount(store);
+  app.render([]);
+  const saved = JSON.parse(store._store.get("dsh-focusing.page"));
+  assert.deepEqual(saved.recTags, ["source:claude", "workspace:/w/app"], "the exact tag combination is restored");
+  app.restore();
+});
+
 test("the focus panel keeps its session, tab, search and roster filter", () => {
   const store = session();
   let app = mount(store);
@@ -191,7 +201,7 @@ test("the focus panel keeps its session, tab, search and roster filter", () => {
 test("stored values are validated, not trusted", () => {
   const store = session();
   store.setItem("dsh-focusing.page", JSON.stringify({
-    view: "records", recRange: 42, recQuery: { nope: 1 }, expanded: [],
+    view: "records", recRange: 42, recQuery: { nope: 1 }, recTags: "not-an-array", expanded: [],
     rosterFilter: "everything", expandedGroups: ["not", "an", "object"], picked: "",
   }));
   const app = mount(store);
@@ -201,6 +211,7 @@ test("stored values are validated, not trusted", () => {
   assert.equal(saved.recRange, "this-week", "a non-string range falls back");
   assert.equal(saved.recQuery, "", "a non-string search falls back");
   assert.equal(saved.expanded, null, "a non-string expanded id falls back");
+  assert.deepEqual(saved.recTags, [], "a non-array tag scope falls back");
   assert.equal(saved.rosterFilter, "all", "an unknown filter falls back");
   assert.deepEqual(saved.expandedGroups, {}, "a non-object folder map falls back");
   assert.equal(saved.picked, null, "an empty id is not kept");

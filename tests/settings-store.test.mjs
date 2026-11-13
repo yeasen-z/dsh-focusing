@@ -17,11 +17,14 @@ test("a saved Codex setting is visible to the very first read after a restart", 
   const { dir, file } = tempFile();
   try {
     const first = createSettingsStore({ file });
-    await first.save({ codexEnabled: true, activityIncludeExternal: true });
+    await first.save({ codexEnabled: true, claudeEnabled: true, claudePathMode: "manual", claudePath: "~/.claude-work", activityIncludeExternal: true });
     // A new store, as after a restart: no await before the first read.
     const restarted = createSettingsStore({ file });
     assert.equal(restarted.get().codexEnabled, true, "not the default false");
     assert.equal(restarted.view().activityIncludeExternal, true);
+    assert.equal(restarted.get().claudeEnabled, true);
+    assert.equal(restarted.get().claudePathMode, "manual");
+    assert.equal(restarted.get().claudePath, "~/.claude-work");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -30,7 +33,9 @@ test("a saved Codex setting is visible to the very first read after a restart", 
 test("a missing settings file means defaults, and a corrupt one does not break the store", () => {
   const { dir, file } = tempFile();
   try {
-    assert.equal(createSettingsStore({ file }).get().codexEnabled, false, "missing file: defaults");
+    const defaults = createSettingsStore({ file }).get();
+    assert.equal(defaults.codexEnabled, false, "missing file: Codex defaults to off");
+    assert.equal(defaults.claudeEnabled, false, "missing file: Claude defaults to off");
     writeFileSync(file, "{ not json");
     const store = createSettingsStore({ file, logger: () => {} });
     assert.equal(store.get().codexEnabled, false, "corrupt file: defaults, not a crash");

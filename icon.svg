@@ -1,13 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Focusing">
-  <rect x="2" y="2" width="60" height="60" rx="14" fill="#1b2430"/>
-  <!-- the loop the model is stuck in -->
-  <circle cx="26" cy="32" r="11" fill="none" stroke="#4a6b8a" stroke-width="3" stroke-dasharray="7 5" stroke-linecap="round"/>
-  <circle cx="26" cy="32" r="3.5" fill="#4a6b8a"/>
-  <!-- the way out: a focus reticle pulling outward -->
-  <g stroke="#f0b429" stroke-width="3" stroke-linecap="round" fill="none">
-    <path d="M40 20 L52 20 M52 20 L52 32"/>
-    <path d="M48 44 L40 44 M40 44 L40 36"/>
-  </g>
-  <circle cx="46" cy="30" r="7" fill="none" stroke="#f0b429" stroke-width="3"/>
-  <circle cx="46" cy="30" r="1.8" fill="#f0b429"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Focusing">
+  <style>:root{color:#64748b}@media(prefers-color-scheme:dark){:root{color:#cbd5e1}}</style>
+  <path d="M9.5 5.5a6 6 0 1 0 3.5 11"/>
+  <path d="M15 4.5h4.5V9"/>
+  <path d="M19.5 4.5 13 11"/>
 </svg>

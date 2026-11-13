@@ -38,7 +38,7 @@ function load({ uiWorkspace, storage } = {}) {
   // The page the Workbench would show next: state 1 is `view`.
   const rerender = () => { index = 0; return Workbench({ ...injected, t: k => dict[k] ?? k, subscribeLocale: () => () => {}, openSession: () => {} }); };
   const seedTemplates = list => Workbench.tplSeed(list);
-  return { render, rerender, dict, store: Workbench.askStore, seedTemplates, view: () => states[1] };
+  return { render, rerender, dict, store: Workbench.askStore, seedTemplates, view: () => states[1], state: () => states };
 }
 const text = n => typeof n === "string" ? n : Array.isArray(n) ? n.map(text).join("") : n && typeof n === "object" ? (n.children || []).map(text).join("") : "";
 // Arrays are flattened the way React flattens them, so a mapped child list is
@@ -288,6 +288,25 @@ test("a finished digest renders summary, projects, days, next steps and follow-u
   assert.ok(md.includes("- 验证"));
 });
 
+test("an imported session reference in digest project items opens its records source", () => {
+  const env = load();
+  const imported = {
+    ...digest,
+    sources: [{ id: "claude:c1", title: "Claude session" }],
+    result: {
+      ...digest.result,
+      projects: [{ ...digest.result.projects[0], items: [{ state: "done", text: "Claude fix", sessions: ["claude:c1"] }] }],
+    },
+  };
+  const tree = env.render([0, "result", "d1", imported, "", [], "", "", null]);
+  const reference = find(tree, n => n.type === "button" && n.props?.title === "Claude session")[0];
+  assert.ok(reference, "the project item links to its source session");
+  reference.props.onClick();
+  assert.equal(env.view(), "records");
+  assert.equal(env.state()[35], "claude", "the records source is selected");
+  assert.equal(env.state()[18], "claude:c1", "the referenced record is expanded");
+});
+
 test("a running digest shows its stages", () => {
   const { render, dict } = load();
   const all = text(render([0, "result", "d1", { ...digest, status: "running", stage: "model", result: null }, "", [], "", "", null]));
@@ -312,7 +331,8 @@ test("records are a source switch over workspace bars, and a bar unfolds its ses
   const dsh = { id: "s1", title: "修复登录", cwd: "/w/app", gist: "g", turns: 2, calls: 5, lastAt: now };
   const docs = { id: "s2", title: "写文档", cwd: "/w/docs", gist: "d", turns: 1, calls: 2, lastAt: now - 1000 };
   const codex = { id: "codex:1", source: "codex", title: "旧 Codex 会话", cwd: "/w/app", gist: "c", turns: 3, calls: 7, lastAt: now - 2000 };
-  const records = { ok: true, records: [dsh, docs, codex], stats: { sessions: 3, turns: 6, calls: 14 }, range: { label: "本周", from: "a", to: "b" }, projects: ["app"], workspaces: ["/w/app", "/w/docs"] };
+  const claude = { id: "claude:1", source: "claude", title: "Claude Code 会话", cwd: "/w/claude", gist: "c", turns: 2, calls: 4, lastAt: now - 3000 };
+  const records = { ok: true, records: [dsh, docs, codex, claude], stats: { sessions: 4, turns: 8, calls: 18 }, range: { label: "本周", from: "a", to: "b" }, projects: ["app"], workspaces: ["/w/app", "/w/docs"] };
   const states = [0, "records", null, null, "", [], "", "", null, "", false, "", "this-week", "", "", "", records, ""];
 
   const tree = render(states);
@@ -331,10 +351,20 @@ test("records are a source switch over workspace bars, and a bar unfolds its ses
   assert.ok(text(imported).includes("旧 Codex 会话"));
   assert.ok(!text(imported).includes("写文档"), "only the chosen source is listed");
 
+  const claudeTab = find(imported, n => n.type === "button" && String(n.props?.className || "").startsWith("fw-src") && text(n).includes(dict.wb_sourceClaude))[0];
+  claudeTab.props.onClick();
+  const claudeView = env.rerender();
+  assert.ok(text(claudeView).includes("Claude Code 会话"), "Claude has its own records tab");
+  assert.ok(!text(claudeView).includes("旧 Codex 会话"), "the other imported source stays hidden");
+  assert.ok(find(claudeView, n => n.props?.className === "fw-pill gray").map(text).includes("Claude"));
+
+  find(claudeView, n => n.type === "button" && String(n.props?.className || "").startsWith("fw-src") && text(n).includes(dict.wb_sourceCodex))[0].props.onClick();
+  const backToCodex = env.rerender();
+
   // The first bar is open with its sessions; folding it hides them.
-  const openedRows = find(imported, n => n.props?.className === "fw-rec");
+  const openedRows = find(backToCodex, n => n.props?.className === "fw-rec");
   assert.equal(openedRows.length, 1, "the first workspace starts unfolded");
-  find(imported, n => n.props?.className === "fw-ws-head")[0].props.onClick();
+  find(backToCodex, n => n.props?.className === "fw-ws-head")[0].props.onClick();
   assert.equal(find(rerender(), n => n.props?.className === "fw-rec").length, 0, "clicking the bar folds its sessions away");
 });
 

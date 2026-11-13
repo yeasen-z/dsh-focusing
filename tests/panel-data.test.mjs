@@ -6,6 +6,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 process.env.DSH_FOCUSING_CODEX_HOME = mkdtempSync(join(tmpdir(), "focusing-codex-empty-"));
+// Each test file runs in its own process; never inherit the active user's profile.
+process.env.DSH_PROFILE_DIR = mkdtempSync(join(tmpdir(), "focusing-panel-suite-"));
 
 const text = value => [{ type: "text", text: value }];
 const event = (type, data, time = 100) => ({ type, data, time });
@@ -144,7 +146,13 @@ function routeHarness(sessions, agents = sessions.map(s => ({ id: s.id }))) {
       });
     },
   };
-  apply(ctx);
+  const previousProfile = process.env.DSH_PROFILE_DIR;
+  process.env.DSH_PROFILE_DIR = mkdtempSync(join(tmpdir(), "focusing-panel-profile-"));
+  try { apply(ctx); }
+  finally {
+    if (previousProfile === undefined) delete process.env.DSH_PROFILE_DIR;
+    else process.env.DSH_PROFILE_DIR = previousProfile;
+  }
   const get = async (id, known) => (await routes.get("/api/dsh-focusing.state")
     .fetch(new Request(`http://localhost/api/dsh-focusing.state${id ? `?session=${id}${known ? `&known=${encodeURIComponent(known)}` : ""}` : ""}`))).json();
   const analyze = async id => (await routes.get("/api/dsh-focusing.analyze")

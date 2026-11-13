@@ -1,7 +1,15 @@
 {
   "name": "dsh-focusing",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yeasen-z/dsh-focusing.git"
+  },
+  "homepage": "https://github.com/yeasen-z/dsh-focusing#readme",
+  "bugs": {
+    "url": "https://github.com/yeasen-z/dsh-focusing/issues"
+  },
   "description": "Experimental context and session workbench for DSH; early releases may contain breaking changes.",
   "keywords": [
     "deepseek-harness",
@@ -13,19 +21,26 @@
   "engines": {
     "dsh": ">=0.2.1-rc.3 <0.3.0"
   },
+  "bin": {
+    "focusing": "./lib/standalone.mjs"
+  },
   "exports": {
     ".": "./lib/index.mjs",
     "./client": "./lib/client.js",
+    "./standalone": "./lib/standalone-server.mjs",
+    "./standalone-app": "./lib/standalone-app.mjs",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
   "files": [
     "lib/*.mjs",
     "lib/client.js",
+    "web/*",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
     "README.md",
+    "CHANGELOG.md",
     "docs/images/*.webp"
   ],
   "dsh": {

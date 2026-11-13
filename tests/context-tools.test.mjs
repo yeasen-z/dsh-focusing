@@ -13,7 +13,7 @@ function fixture() {
   ];
   let enabled=true;
   const record = foldRecord(events,{id:'codex:x',cwd:'/work',source:'codex'});
-  const other = {...record,id:'outside',cwd:'/secret'};
+  const other = {...record,id:'outside',cwd:'/secret',source:'dsh'};
   return {events, disable:()=>{enabled=false;}, source:{
     records:async()=> enabled?[record,other]:[other],
     record:async id=>id==='outside'?other:enabled?record:undefined,
@@ -23,6 +23,7 @@ function fixture() {
 test('tools register host-compatible definitions and disposers', async()=>{
   const definitions=createContextTools(fixture().source);
   assert.deepEqual(definitions.map(d=>d.name),['focus_list_sessions','focus_read_session','focus_activity']);
+  assert.deepEqual(definitions[0].parameters.properties.sources.items.enum,['dsh','codex','claude']);
   // The installed DSH registry rejects numeric bound keywords, even though
   // standard JSON Schema accepts them. Bounds are checked by execution code.
   const supported = new Set(['type','properties','required','additionalProperties','items','enum','description']);
@@ -58,6 +59,9 @@ test('workspace, source, time, cursor and cancellation boundaries',async()=>{
   const f=fixture(); const query=createContextQueries(f.source);
   // No caller workspace is needed: the query is not tied to where it is asked from.
   assert.equal((await query('focus_list_sessions',{},{})).total,2);
+  assert.equal((await query('focus_list_sessions',{sources:['codex']},exec)).total,1);
+  assert.equal((await query('focus_list_sessions',{sources:['claude']},exec)).total,0);
+  await assert.rejects(query('focus_list_sessions',{sources:['other']},exec),/Invalid sources/);
   assert.equal((await query('focus_list_sessions',{cwd:'/secret'},exec)).total,1);
   assert.equal((await query('focus_list_sessions',{cwd:'/nowhere'},exec)).total,0);
   await assert.rejects(query('focus_list_sessions',{cwd:5},exec),/cwd/);

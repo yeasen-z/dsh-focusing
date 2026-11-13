@@ -79,6 +79,17 @@ test("follow-ups reuse the native DSH session and stop delegates to it", async (
   assert.deepEqual(h.calls.at(-1).cancel, { sessionId: "s1" });
 });
 
+test("native follow-ups keep their original workspace tag scope", async () => {
+  const h = setup();
+  const tags = ["source:dsh", "workspace:/work/project"];
+  const first = await h.post({ question: "what changed here?", range: "all", tags });
+  assert.deepEqual(first.ask.tags, tags);
+  const next = await h.post({ id: first.ask.id, question: "and the tests?", tags: ["workspace:/other"] });
+  assert.deepEqual(next.ask.tags, tags, "a follow-up cannot silently widen or change the bound scope");
+  const listed = await h.call("/api/dsh-focusing.native-ask");
+  assert.deepEqual(listed.asks[0].tags, tags);
+});
+
 test("legacy asks are listed read-only and cannot be continued", async () => {
   const h = setup({ legacy: [{ id: "old", title: "old", status: "idle", messages: [], steps: [], createdAt: 1 }] });
   const list = await h.call("/api/dsh-focusing.native-ask");

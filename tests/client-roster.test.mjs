@@ -258,6 +258,22 @@ test("Codex chats sit in their own section, apart from the DSH folders", async t
   assert.ok(!dshFolders.some(f => all(f).some(n => n.children?.includes("来自 Codex 的会话"))), "not mixed into the DSH folders");
 });
 
+const claudeRow = { id: "claude:bbb", source: "claude", sourceId: "bbb", title: "来自 Claude 的会话", project: "paper", cwd: "/p", updatedAt: NOW - 6 * 60e3, status: "idle", loaded: true, archived: false, reviewed: false, reviewCount: 0 };
+
+test("Claude chats have a separate read-only section and stay out of recent DSH chats", async t => {
+  const { tree, tick, stop } = await mount({ extra: [claudeRow] });
+  t.after(stop);
+  const section = all(tree).find(n => n.props?.className === "fz-source-section" && all(n).some(c => c.children?.includes("Claude Code 会话")));
+  assert.ok(section, "a separate Claude Code section");
+  all(section).find(n => n.props?.className === "fz-group-head").props.onClick();
+  const opened = all(tick()).find(n => n.props?.className === "fz-source-section" && all(n).some(c => c.children?.includes("Claude Code 会话")));
+  const row = all(opened).find(n => /(^| )fz-session( |$)/.test(String(n.props?.className)) && all(n).some(c => c.children?.includes("来自 Claude 的会话")));
+  assert.ok(row, "the Claude chat renders after its folder opens");
+  assert.match(row.props.title, /只读/);
+  const recentCards = all(tree).filter(n => /^fz-recent-card( |$)/.test(String(n.props?.className)));
+  assert.ok(!recentCards.some(card => all(card).some(n => n.children?.includes("来自 Claude 的会话"))));
+});
+
 test("the pinned recent list shows DSH chats only", async t => {
   const { tree, stop } = await mount({ extra: [codexRow] });
   t.after(stop);

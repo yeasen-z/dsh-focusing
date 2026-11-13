@@ -1,0 +1,46 @@
+/* Standalone host for the existing Focusing client. It supplies the same theme
+   token contract as the DSH Web shell; component CSS remains in lib/client.js. */
+:root {
+  --dsw-alias-bg-base: #f5f6f8;
+  --dsw-alias-bg-layer-1: #ffffff;
+  --dsw-alias-bg-layer-2: #eff1f4;
+  --dsw-alias-bg-overlay: #ffffff;
+  --dsw-alias-border-l1: #e1e4e8;
+  --dsw-alias-border-l2: #cdd2d9;
+  --dsw-alias-brand-primary: #4263a8;
+  --dsw-alias-label-primary: #24282f;
+  --dsw-alias-label-secondary: #69717d;
+  --dsw-alias-state-error-primary: #b4443c;
+  --dsw-alias-state-idle-primary: #7c8490;
+  --dsw-alias-state-success-primary: #237a52;
+  --dsw-alias-state-warn-primary: #a56b12;
+  --dsw-specific-sidebar-fill: #f8f9fb;
+  --dsh-frame-top-clearance: 0px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dsw-alias-bg-base: #191b20;
+    --dsw-alias-bg-layer-1: #22262d;
+    --dsw-alias-bg-layer-2: #2c313a;
+    --dsw-alias-bg-overlay: #282d35;
+    --dsw-alias-border-l1: #3a404a;
+    --dsw-alias-border-l2: #4b5360;
+    --dsw-alias-brand-primary: #91a9df;
+    --dsw-alias-label-primary: #e7e9ed;
+    --dsw-alias-label-secondary: #a4acb8;
+    --dsw-alias-state-error-primary: #e08a82;
+    --dsw-alias-state-idle-primary: #8b95a3;
+    --dsw-alias-state-success-primary: #65bd92;
+    --dsw-alias-state-warn-primary: #dfac52;
+    --dsw-specific-sidebar-fill: #1e2229;
+    color-scheme: dark;
+  }
+}
+html, body, #root, .standalone-root { width: 100%; height: 100%; margin: 0; }
+body { overflow: hidden; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.standalone-root { position: relative; }
+.standalone-boot { height: 100%; display: grid; place-items: center; color: var(--dsw-alias-label-secondary); font-size: 13px; }
+.standalone-error { max-width: 560px; margin: 80px auto; padding: 24px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); }
+.standalone-error h1 { font-size: 18px; }
+.standalone-error pre { white-space: pre-wrap; color: var(--dsw-alias-state-error-primary); }

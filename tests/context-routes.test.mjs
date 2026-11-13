@@ -193,6 +193,53 @@ test("Codex records participate in listing, detail, digest and follow-up", async
   assert.equal((await waitDone(h, single.digest.id)).status, "failed");
 });
 
+test("Claude records participate in listing, detail and digest through the same source interface", async () => {
+  const path = join(dir, "claude.jsonl");
+  const row = (type, delta, extra = {}) => JSON.stringify({ type, timestamp: new Date(recentAt + delta).toISOString(), sessionId: "cl", cwd: "/w/claude", ...extra });
+  writeFileSync(path, [
+    JSON.stringify({ type: "summary", summary: "Claude handoff" }),
+    row("user", 0, { message: { role: "user", content: "repair Claude fixture" } }),
+    row("assistant", 1, { message: { role: "assistant", content: [{ type: "text", text: "Claude repair complete" }] } }),
+  ].join("\n"));
+  let enabled = true;
+  const h = setup('{"title":"Combined Claude","summary":"done"}', { claudeChats: async () => enabled ? [{ id: "cl", path, updatedAt: recentAt + 1 }] : [] });
+  const list = await h.call("/api/dsh-focusing.records?range=last-7d&offset=480");
+  assert.equal(list.records.length, 2);
+  assert.equal(list.records.find(r => r.id === "claude:cl").source, "claude");
+  assert.equal(list.records.find(r => r.id === "claude:cl").title, "Claude handoff");
+  const detail = await h.call("/api/dsh-focusing.records/detail?id=claude:cl");
+  assert.equal(detail.record.lastReply, "Claude repair complete");
+  const started = await h.post("/api/dsh-focusing.digest", { request: "today", offset: 480 });
+  const digest = await waitDone(h, started.digest.id);
+  assert.equal(digest.stats.sessions, 2);
+  assert.match(h.prompts[0], /Claude repair complete/);
+  const taggedStart = await h.post("/api/dsh-focusing.digest", { request: "today", offset: 480, tags: ["source:claude", "workspace:/w/claude"] });
+  const taggedDigest = await waitDone(h, taggedStart.digest.id);
+  assert.equal(taggedDigest.stats.sessions, 1, "a report only reads sessions matching every tag");
+  assert.deepEqual(taggedDigest.tags, ["source:claude", "workspace:/w/claude"]);
+  assert.deepEqual(taggedDigest.sources[0].tags, ["source:claude", "project:claude", "workspace:/w/claude"]);
+  enabled = false;
+  const disabled = await h.call("/api/dsh-focusing.records?range=last-7d&offset=480");
+  assert.equal(disabled.records.some(r => r.source === "claude"), false);
+});
+
+test("the activity calendar combines enabled Codex and Claude sources and reports pending work", async () => {
+  const imported = (id, source) => ({ id, source, personal: true, turns: [{ start: recentAt, end: recentAt + 1, calls: 1, requests: [{ time: recentAt }] }] });
+  const h = setup("unused", {
+    codexRecords: () => ({ enabled: true, ok: true, pending: 2, records: [imported("codex:c", "codex")] }),
+    claudeRecords: () => ({ enabled: true, ok: true, pending: 1, records: [imported("claude:c", "claude")] }),
+  });
+  const body = await h.call("/api/dsh-focusing.activity?days=7&offset=480&external=1");
+  assert.equal(body.ok, true);
+  assert.equal(body.total, 3);
+  assert.equal(body.externalEnabled, true);
+  assert.equal(body.externalAvailable, true);
+  assert.equal(body.externalPending, 3);
+  const active = body.days.find(day => day.turns > 0);
+  assert.equal(active.bySource.codex, 1);
+  assert.equal(active.bySource.claude, 1);
+});
+
 // ---- asking: a short tool loop behind one route -----------------------------
 test("a question runs the tool loop: the model asks for a tool, gets real data, then answers", async () => {
   const requests = [];

@@ -133,6 +133,17 @@ test("with the switch on, the footer counts how many turns came from Codex", asy
   assert.match(text(find(tree, n => n.props?.className === "fw-cal-note")[0]), /其中 5 轮来自 Codex/);
 });
 
+test("the footer and daily tooltip separate Claude turns from Codex", async () => {
+  const data = calendar({ includeExternal: true });
+  data.days[1].bySource.claude = 2;
+  const { render } = await mount(data);
+  const tree = render([data, "", false, 0]);
+  assert.match(text(find(tree, n => n.props?.className === "fw-cal-note")[0]), /其中 2 轮来自 Claude/);
+  assert.match(text(find(tree, n => n.props?.className === "fw-cal-note")[0]), /其中 5 轮来自 Codex/);
+  const cell = find(tree, n => n.props?.title?.includes("2026-10-20"))[0];
+  assert.match(cell.props.title, /Claude 2/);
+});
+
 test("when Codex import is off the switch still works: it turns the import on too", async () => {
   const posts = [];
   const { render, dict } = await mount(calendar(), { posts });

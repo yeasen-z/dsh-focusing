@@ -4,16 +4,16 @@
 
 **你的 context · session 管家。**
 
-Focusing 是 DeepSeek Harness（DSH）的上下文工作台，把 DSH 会话和本机 Codex 记录汇集起来：查找过去的工作、整理日报与交接、让不同会话的经验参与讨论，以及观察 Agent 是否陷入重复尝试。
+Focusing 是 DeepSeek Harness（DSH）的上下文工作台，把 DSH 会话和本机 Codex、Claude Code 记录汇集起来：查找过去的工作、整理日报与交接、让不同会话的经验参与讨论，以及观察 Agent 是否陷入重复尝试。
 
-> [!WARNING]
-> **当前处于可能包含破坏性变更的早期更新阶段。** 配置格式、存储结构、页面行为及插件接口可能在后续版本中不兼容地调整，功能稳定性尚未经过充分确认。请勿直接用于关键生产数据；升级前请备份插件数据，并在测试环境验证。当前版本已在 DSH `0.2.1-rc.3` 上开发和测试，其他版本尚未确认兼容性。
+## 0.2.0 更新
 
-## 0.1.0 更新
+- **Claude Code 导入**：独立开启数据来源，自动发现会话目录；历史记录可用于问答、报告、活动统计与专注分析。
+- **统一上下文记录**：按 DSH / Codex / Claude 来源和工作区浏览，复用持久索引；DSH 会话支持复制上下文继续。
+- **可选界面增强**：侧栏字号、顶部会话标签、运行中／待批准状态与后台完成提示。
+- **Claude 索引修复**：排除子代理日志，避免同 ID 记录掩盖主会话，并自动重建旧缓存。
 
-- 上下文记录按工作区和 DSH/Codex 来源浏览；DSH 会话可复制上下文继续，Codex 记录可在同一工作目录开启 DSH 会话。
-- 活动日历与上下文记录使用持久索引，未变更的会话可在重启后复用整理结果。
-- 周报、日报与会话交接模板要求写明改动、结果、验证证据和遗留问题；生成提示词鼓励完整说明，避免只有会话标题或笼统结论。
+[安装与开始使用](#安装升级与开始使用) · [完整更新记录](CHANGELOG.md) · [外部会话继续：待完成](#待完成外部会话在-dsh-中继续)
 
 ## 从哪里开始
 
@@ -32,7 +32,7 @@ Focusing 是 DeepSeek Harness（DSH）的上下文工作台，把 DSH 会话和�
 
 首页是导览，集中展示五个能力入口、本周会话与项目概览、活动日历，以及最近的问答和整理结果。点击卡片进入对应页面，点击最近记录继续之前的工作。
 
-活动日历每格代表一天，颜色深浅表示对话轮次。总轮次、活跃天数和连续活跃情况由日志计算；开启“包括外部导入的会话”后可计入 Codex，并显示其贡献。上方的本周概览与日历可能覆盖不同时间窗口。
+活动日历每格代表一天，颜色深浅表示对话轮次。总轮次、活跃天数和连续活跃情况由日志计算；开启“包括外部导入的会话”后可计入已启用的 Codex、Claude Code 记录，并分别显示其贡献。上方的本周概览与日历可能覆盖不同时间窗口。
 
 截图中的计数是示例数据。对话轮次、工具调用量反映活动量，不能直接换算成实际工时或生产力评分。
 
@@ -91,25 +91,103 @@ Focusing 是 DeepSeek Harness（DSH）的上下文工作台，把 DSH 会话和�
 
 ### 上下文记录：按工作区回到材料，接着继续
 
-顶部是时间跨度（今天、本周、上周、本月、最近 30 天、**全部**）和关键词搜索，其下用 **DSH / Codex** 切换来源（各自显示会话数）；再往下每个**工作区一条横栏**，标出目录名、完整路径、会话数和最近活动，点开横栏列出该目录下的会话，点会话展开请求、阶段结论、识别到的文件改动和待办。记录卡片只标 `DSH` 或 `Codex` 来源，不再堆叠工作区标签。
+![上下文记录：时间筛选、来源切换与工作区分组](docs/images/context-records.webp)
+
+截图保留筛选区与工作区标题，个人目录已遮挡；外部会话继续功能仍待完成。
+
+顶部是时间跨度（今天、本周、上周、本月、最近 30 天、**全部**）和关键词搜索，其下用 **DSH / Codex / Claude** 切换来源（各自显示会话数）；再往下每个**工作区一条横栏**，标出目录名、完整路径、会话数和最近活动，点开横栏列出该目录下的会话，点会话展开请求、阶段结论、识别到的文件改动和待办。记录卡片只标 `DSH`、`Codex` 或 `Claude` 来源，不再堆叠工作区标签。
 
 - **DSH 会话**提供「继续上下文对话」：由 Host 复制该会话并打开副本，原会话不动，新会话保留全部上下文。
-- **Codex 会话**只读，提供「在 DSH 中继续」：在该工作目录新开一个 DSH 会话，由你接手。
-- 也可从单个会话生成交接文档；DSH 与已启用导入的 Codex 使用统一读取入口。
+- **Codex、Claude Code 会话**只读；「在 DSH 中继续」入口目前**待完成**，存在工作区映射错误，暂不能视为可用能力。
+- 也可从单个会话生成交接文档；DSH 与已启用的导入来源使用统一读取入口。
+
+#### 待完成：外部会话「在 DSH 中继续」
+
+2026-11-13 已定位：外部记录按钮将 `rec.cwd`（目录路径）直接传给 `uiWorkspace.startSession`，而该接口要求 DSH 的 `WorkspaceId`。因此，即使 DSH 已有同一目录对应的工作区，仍可能报 `uiWorkspace.connectWorkspace: unknown workspace <目录路径>`。问题位于 [客户端](lib/client.js) 的外部记录按钮与 `startDraft` 调用链；本次仅记录问题，尚未修复。
+
+- [ ] 将外部记录的工作目录匹配到 DSH 已注册工作区，取得真实 `WorkspaceId` 后再创建会话；处理路径规范化、未匹配和匹配不唯一的情况。
+- [ ] 验证 Codex、Claude Code 两类来源，覆盖工作区已存在和未注册的场景，避免把目录路径当作工作区 ID。
+- [ ] 明确按钮文案与上下文交接方式：当前实现意图仅是在相同目录新建 DSH 会话，未携带外部会话历史，也未调用 Codex／Claude 原生 resume。历史交接或原生继续运行需另行设计、实现和验证。
 
 列表由持久索引驱动：每个会话只整理一次，文件没变就直接复用，重启后不再重扫全部记录；范围统计仍只计算所选时间跨度内的轮次。需要核对更长的消息或工具输出时，历史问答可以读取原始事件。
 
 ### 专注纠偏：观察重复尝试，按需分析
 
+<!-- 截图预留：专注纠偏结果与分析历史，docs/images/focus-review.webp。 -->
+
 专注纠偏提供单会话活动观察、手动模型分析和分析历史。确定性检测器关注重复错误、重复调用和缺少进展；步数预算只作为辅助信号，不单独触发干预。
 
-自动干预有软提示、重复调用拦截和子代理诊断三种，默认关闭，可在插件配置中启用。手动分析支持 DSH 历史会话和导入的 Codex 会话，结果可保存回看；DSH 会话还会提示分析之后是否有新活动。
+自动干预有软提示、重复调用拦截和子代理诊断三种，默认关闭，可在插件配置中启用。手动分析支持 DSH 历史会话和导入的 Codex、Claude Code 会话，结果可保存回看；DSH 会话还会提示分析之后是否有新活动。
 
-Codex 导入只读，分析结果留在 Focusing，不会控制 Codex 或向 Codex 注入纠偏消息。
+Codex、Claude Code 导入均为只读，分析结果留在 Focusing，不会控制原工具或向原会话注入纠偏消息。协作室当前仍只选择 DSH 会话。
+
+## 可选界面调节
+
+![界面设置：侧栏字号与顶部会话标签开关](docs/images/interface-settings.webp)
+
+![顶部会话标签：当前标签下划线与原生操作栏](docs/images/session-tabs.webp)
+
+顶部截图中的其他会话标题已遮挡；当前标签与原生操作布局保留。
+
+在 **Focusing → 设置 → 界面** 中分别勾选并保存，两个功能默认都关闭：
+
+- **调整左侧栏字号**：12–20 px，调整左侧会话、项目、导航以及相关次级文字；取消勾选移除覆盖样式，恢复 DSH 原样。
+- **顶部会话标签栏**：打开主会话时添加标签，支持横向滚动和快速切换；当前标签用蓝色下划线标识。关闭标签不删除或归档会话，关闭最后一个标签返回 Focusing。
+- **会话状态**：标签显示“运行中”或“待批准”；观察到后台任务完成后显示未读绿点，打开查看后清除。
+
+开关与字号保存在 Focusing 设置中；标签列表与未读状态保存在当前浏览器，刷新后恢复。顶部 Focusing 图标用于进入工作台，在工作台中则显示“返回会话”。
+
+界面适配针对 DSH 0.2.2-rc 系列的页面结构，升级 DSH 后需复核；关闭对应开关可恢复原生布局。
+
+<details>
+<summary>独立网页（已封存，开发参考）</summary>
+
+独立浏览器服务暂不启用。以下保留实现与启动说明，重新启用前需完成接入及权限验证。
+
+<!-- 功能恢复并完成验收后再补截图：![独立网页工作台](docs/images/standalone-workbench.webp) -->
+
+网页直接加载与 DSH 插件相同的 [Workbench](lib/client.js)，共用导航、记录页、设置对话框和样式。纯本地运行时读取 Codex、Claude Code 日志，支持外部模型分析和报告；DSH 桥接模式接入原生会话、Host 模型、历史问答和协作室，使用 DSH 已注册的业务接口。
+
+```bash
+# 在仓库中启动，默认监听 http://127.0.0.1:8765
+node lib/standalone.mjs
+
+# 选择空闲端口，启动后打印实际 URL
+node lib/standalone.mjs --port 0
+
+# 指定独立数据目录
+FOCUSING_DATA_DIR=/tmp/focusing-demo node lib/standalone.mjs --port 0
+```
+
+作为 npm 包安装后，也可运行 `focusing serve`。打开命令输出的 `FOCUSING_URL`，在顶栏设置的来源页开启 Claude Code 或 Codex 导入。页面支持：
+
+- 来源开关、自动/手动目录、索引状态和错误提示。
+- 按时间、来源、项目、工作区及关键词筛选记录；展开查看会话详情。
+- 活动日历、手动分析、Markdown/JSON 导出、报告模板和报告追问。
+- 外部模型设置、连接测试及模型目录读取。
+
+会话 Tag 使用稳定 ID：`source:claude`、`project:项目名`、`workspace:完整路径`。多个 Tag 按 AND 匹配；同名项目可通过工作区完整路径区分。范围问答会把所选 Tag 绑定到历史读取工具，继续追问也沿用该范围。
+
+纯本地模式没有 DSH 服务连接时，页面按实际能力隐藏 DSH 问答、协作室及原会话操作。桥接模式复用 DSH 中现有的会话、模型、问答历史、报告、分析和协作室；当前网页桥接尚未支持打开原会话、复制后跳转及未发送草稿，这些操作依赖 DSH Client 导航。
+
+在 DSH 中可让 Agent 调用 `focusing_web`：`action: "start"` 启动桥接并返回私有访问 URL，`status` 查看状态，`stop` 关闭监听且保留所有历史。首次打开 URL 后会跳转到不含凭证的地址，并使用 HttpOnly、SameSite=Strict cookie。重启桥接会生成新的凭证；不要公开分享首次访问链接。该工具与已鉴权 DSH 域下的 `/api/dsh-focusing.bridge` 启停接口调用相同操作，默认不会自动开启监听。
+
+服务仅监听 `127.0.0.1`、`::1` 或 `localhost`，校验 Host、端口、Origin 和跨站请求，不提供局域网访问。纯本地设置与索引默认保存到 `~/.focusing`，可用 `FOCUSING_DATA_DIR` 或 `--data-dir` 修改。按 `Ctrl+C` 停止时会等待在途索引读取结束。
+
+</details>
 
 ## 安装、升级与开始使用
 
-**要求：** DSH `>=0.2.1-rc.3 <0.3.0`。目前只在 `0.2.1-rc.3` 上完成测试。
+**版本要求：** DSH `>=0.2.1-rc.3 <0.3.0`。界面增强适配说明见「可选界面调节」。
+
+### 0.2.0 验证与限制
+
+- 隔离 `DSH_PROFILE_DIR` 运行全量测试：408 项通过、0 失败、0 跳过；入口语法检查及 npm 打包预检通过。
+- 自动化测试不替代真实 Host 安装验收；新增功能尚未完成所声明版本范围内的全面验证。
+- 外部会话「在 DSH 中继续」仍待完成，详见上下文记录章节。
+- 独立网页服务保持封存。
+
+完整版本变更见 [更新记录](CHANGELOG.md)。
 
 ### 从 npm 快速安装
 
@@ -119,13 +197,13 @@ npm 包名是 **`dsh-focusing`**。在 DSH 打开 **插件 → 添加插件**，
 dsh-focusing
 ```
 
-也可以固定安装本次版本（先用 `npm view dsh-focusing version` 确认 registry 已同步到 `0.1.0`）：
+也可指定版本安装：
 
 ```text
-dsh-focusing@0.1.0
+dsh-focusing@0.2.0
 ```
 
-npm 上的 `0.0.1` 已可安装；如果你使用的 registry 还没有 `0.1.0`，可先按下方方法从本地仓库安装。批准安装并启用 **Focusing**，按 DSH 的提示刷新页面或重启。当前仍处于可能包含破坏性变更的早期阶段；`0.x` 版本不承诺向后兼容。
+如果所用 registry 尚未提供该版本，可按下方方法从本地发布包安装。批准安装并启用 **Focusing**，按 DSH 的提示刷新页面或重启。
 
 ### 从本地仓库安装
 
@@ -135,14 +213,15 @@ npm 上的 `0.0.1` 已可安装；如果你使用的 registry 还没有 `0.1.0`�
 npm pack
 ```
 
-生成 `dsh-focusing-0.1.0.tgz` 后，通过 DSH 插件管理器安装该文件。不要手动修改 DSH profile 的 `package.json` 或 patch 文件，也不要把仓库手工链接进 profile。
+生成 `dsh-focusing-0.2.0.tgz` 后，通过 DSH 插件管理器安装该文件。不要手动修改 DSH profile 的 `package.json` 或 patch 文件，也不要把仓库手工链接进 profile。
 
-升级前请备份当前 profile 中的 `dsh-focusing.*.json` 数据文件。由于当前处于可能包含破坏性变更的阶段，新版本不保证直接兼容旧版配置和存储数据；请先在非关键 profile 中验证。替换已安装版本通常需要完整重启才能加载新的 Host 模块。
+升级前可备份当前 profile 中的 `dsh-focusing.*.json` 数据文件。替换已安装版本通常需要完整重启才能加载新的 Host 模块。
 
 1. 安装并启用插件后，从侧栏打开 **Focusing**。入口及默认配置声明在 `package.json` 和 `cordis.patch.yml`。
 2. 点击导航顶部的设置齿轮，在“模型与连接”中选择 DSH 已配置模型，或配置外部 OpenAI 兼容接口。
 3. 如需纳入 Codex，在“来源”中开启导入。可自动查找 `CODEX_HOME`、`~/.codex`，或手动指定目录。初次索引可能需要等待。
-4. 到问答页选择搜索范围并提问；需要固定格式输出时，到整理与报告选择模板。
+4. 如需纳入 Claude Code，单独开启 Claude 导入。自动发现依次查找 `CLAUDE_CONFIG_DIR` 和 `~/.claude`，读取其中的 `projects/**/*.jsonl`；也可手动填写配置目录或 `projects` 目录。这里导入的是本机会话记录，不是 Anthropic API 或模型供应商配置。
+5. 到问答页选择搜索范围并提问；需要固定格式输出时，到整理与报告选择模板。
 
 | 功能 | 模型来源 |
 |---|---|
@@ -153,6 +232,8 @@ npm pack
 插件模型设置不替换普通 DSH 聊天选择的模型。保存设置不会自动分析内容；连接测试只发送探测文本。专注分析可预览将发送的提示词与材料，API Key 留在 Host，页面只收到是否已配置的标记。
 
 模型 id 可能本身带斜杠（如 `copilot/auto`），选择器按第一个斜杠拆分，不会截断。已保存但供应商不再提供的模型会在启动、打开模型列表或保存设置时自动修复：能唯一补全的就补全，否则清空该选项、回落到「跟随 DSH 当前默认模型」，避免每次调用都报 `UNKNOWN_MODEL`。
+
+<!-- 截图预留：Codex / Claude 来源开关、目录与索引状态，docs/images/source-settings.webp。 -->
 
 ## 查询机制与当前边界
 
@@ -171,7 +252,7 @@ npm pack
 - **统计不等于完整审计**：大范围报告会压缩上下文；文件、失败和命令提取依赖事件格式。活动量不能直接表示工时。
 - **历史时区使用固定偏移**：不是 IANA 时区，跨夏令时切换的时间范围需要核对。查询采用 `[start, end)`，包含开始、不包含结束；活动查询单次最多 366 天。
 
-原始会话从 DSH 服务或本机 Codex rollout 只读获取。发起问答、报告、分析和协作讨论时，相关材料会发送到所选模型服务。历史消息及工具输出作为资料处理，不能被当作新的执行指令。
+原始会话从 DSH 服务、本机 Codex rollout 或 Claude Code JSONL 只读获取。发起问答、报告、分析和协作讨论时，相关材料会发送到所选模型服务。历史消息及工具输出作为资料处理，不能被当作新的执行指令。
 
 <details>
 <summary>本地存储与开发入口</summary>
@@ -187,14 +268,31 @@ npm pack
 | `dsh-focusing.rooms.json` | 协作室快照、讨论与简报 |
 | `dsh-focusing.reviews.json` | 单会话分析历史 |
 | `dsh-focusing.codex-index.json` | Codex 索引缓存 |
+| `dsh-focusing.claude-index.json` | Claude Code 索引缓存 |
 | `dsh-focusing.activity-index.json` | 活动日历的每日时间线缓存（只含计数与时间，不含对话文本） |
 | `dsh-focusing.records-index.json` | 上下文记录的持久索引（每个会话的列表行，按文件修订增量更新） |
+
+### 核心层与宿主边界
+
+来源、查询和模型模块可以在没有 Cordis、HTTP 或 DSH 服务查找的情况下实例化。DSH 插件和独立本地服务共用这些模块与 Workbench；桥接模式转发到已有的 DSH 业务处理器，避免另建一套会话和设置存储。
+
+- `imported-runtime.mjs` 管理导入来源的目录、索引、状态、详情和后台读取生命周期；目录切换会退休旧 reader 并纳入清理等待，日历排除外部来源时只做轻量状态检查。
+- `context-service.mjs` 提供记录列表、详情、活动统计和报告取材，不处理 HTTP 协议。
+- `model-gateway.mjs` 统一报告、追问、协作室、专注分析和连接测试的一次性模型调用；Host 模型与外部 OpenAI 兼容接口都是注入的驱动。
+- 原生 DSH 问答 Agent、会话复制/归档、实时干预和 UI Slot 仍属于 Host 适配层。
 
 | 模块 | 代码入口 |
 |---|---|
 | Host / UI | `lib/index.mjs`、`lib/client.js` |
-| 读取、折叠、索引 | `lib/context-source.mjs`、`lib/context-records.mjs`、`lib/record-index.mjs` |
+| 读取、折叠、索引 | `lib/context-source.mjs`、`lib/context-records.mjs`、`lib/record-index.mjs`、`lib/transcript-index.mjs` |
+| 来源运行时 | `lib/imported-runtime.mjs` |
+| 上下文查询 | `lib/context-service.mjs` |
+| 一次性模型网关 | `lib/model-gateway.mjs` |
+| 独立应用与服务 | `lib/standalone-app.mjs`、`lib/standalone-server.mjs`、`lib/standalone.mjs` |
+| 共享网页入口 | [index.html](web/index.html)、[standalone-shell.js](web/standalone-shell.js)、[theme.css](web/theme.css) |
+| DSH 桥接 | [dsh-bridge.mjs](lib/dsh-bridge.mjs) |
 | Codex 导入 | `lib/codex-rollout.mjs`、`lib/codex-index.mjs` |
+| Claude Code 导入 | `lib/claude-code.mjs` |
 | 历史问答 | `lib/ask.mjs`、`lib/ask-store.mjs`、`lib/context-tools.mjs`、`lib/native-ask-routes.mjs`、`lib/focusing-session-store.mjs` |
 | 模板与报告 | `lib/template-store.mjs`、`lib/digest.mjs`、`lib/digest-store.mjs`、`lib/context-routes.mjs` |
 | 活动与时间 | `lib/activity.mjs`、`lib/time-range.mjs` |
@@ -214,4 +312,4 @@ node --check lib/client.js
 
 </details>
 
-截图展示工作台、独立问答、模板报告和协作室，包含浅色与深色界面。图片使用保留原始分辨率的无损 WebP；原始 PNG 为 `profile.png`、`chat.png`、`summary.png`、`session_interact.png`。截图中的名称、计数和时间仅代表拍摄时的状态。
+截图展示工作台、独立问答、模板报告、协作室、上下文筛选、界面设置和顶部会话标签，包含浅色与深色界面。图片以无损 WebP 保存；新增展示图按功能区域裁剪，部分个人路径与会话标题已遮挡。截图中的名称、计数和时间仅代表拍摄时的状态。
