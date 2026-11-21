@@ -1,6 +1,6 @@
 {
   "name": "dsh-focusing",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "repository": {
     "type": "git",
@@ -19,7 +19,7 @@
     "session"
   ],
   "engines": {
-    "dsh": ">=0.2.1-rc.3 <0.3.0"
+    "dsh": ">=0.2.2-rc.2 <0.3.0"
   },
   "bin": {
     "focusing": "./lib/standalone.mjs"
@@ -27,6 +27,7 @@
   "exports": {
     ".": "./lib/index.mjs",
     "./client": "./lib/client.js",
+    "./history-advisor-policy": "./lib/history-advisor-policy.mjs",
     "./standalone": "./lib/standalone-server.mjs",
     "./standalone-app": "./lib/standalone-app.mjs",
     "./locale/*.json": "./locale/*.json",
@@ -35,6 +36,7 @@
   "files": [
     "lib/*.mjs",
     "lib/client.js",
+    "scripts/verify-history-advisor-runtime.mjs",
     "web/*",
     "cordis.patch.yml",
     "locale/*.json",

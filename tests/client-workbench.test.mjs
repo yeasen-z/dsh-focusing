@@ -6,17 +6,18 @@ import fs from "node:fs";
 
 const SOURCE = fs.readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
 
-function load({ uiWorkspace, storage } = {}) {
+function load({ uiWorkspace, storage, workspaces, sessions, conversation } = {}) {
   let captured;
   globalThis.window = { __ModuleLoader__: { load: d => { captured = d; } }, sessionStorage: storage };
   globalThis.fetch ??= async () => ({ ok: true, json: async () => ({}) });
   new Function(SOURCE)();
   let states = [];
   let index = 0;
+  let refs = [], refIndex = 0;
   const React = {
     createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
     Fragment: "Fragment",
-    useEffect: () => {}, useRef: v => ({ current: v }), useCallback: f => f,
+    useEffect: () => {}, useRef: v => refs[refIndex++] ??= { current: v }, useCallback: f => f,
     // React calls a function initializer once; so does this stub, otherwise a
     // lazily seeded state would reach the component as the function itself.
     useState: init => { const i = index++; if (!(i in states)) states[i] = typeof init === "function" ? init() : init; return [states[i], v => { states[i] = typeof v === "function" ? v(states[i]) : v; }]; },
@@ -26,19 +27,19 @@ function load({ uiWorkspace, storage } = {}) {
   let Workbench, injected;
   api.apply({
     locale: { bind: () => k => dict[k] ?? k, register: (ns, l, table) => { if (l === "zh") Object.assign(dict, table); return () => {}; }, subscribe: () => () => {} },
-    effect: fn => fn(), get: n => n === 'uiWorkspace' ? uiWorkspace : undefined,
+    effect: fn => fn(), get: n => ({ uiWorkspace, workspaces, sessions, conversation })[n],
     slots: { inject: (n, fn) => fn(), register: (o, c) => { if (o.name === "focusing.panel.body") { Workbench = c; injected = o.inject?.(); } return () => {}; } },
   });
   const render = (preset) => {
     // A copy: an async setState left over from an earlier test must not write
     // back into the shared preset array.
-    states = preset ? [...preset] : []; index = 0;
+    states = preset ? [...preset] : []; index = 0; refs = []; refIndex = 0;
     return Workbench({ ...injected, t: k => dict[k] ?? k, subscribeLocale: () => () => {}, openSession: () => {} });
   };
   // The page the Workbench would show next: state 1 is `view`.
-  const rerender = () => { index = 0; return Workbench({ ...injected, t: k => dict[k] ?? k, subscribeLocale: () => () => {}, openSession: () => {} }); };
+  const rerender = () => { index = 0; refIndex = 0; return Workbench({ ...injected, t: k => dict[k] ?? k, subscribeLocale: () => () => {}, openSession: () => {} }); };
   const seedTemplates = list => Workbench.tplSeed(list);
-  return { render, rerender, dict, store: Workbench.askStore, seedTemplates, view: () => states[1], state: () => states };
+  return { render, rerender, dict, startDraft: injected.startDraft, store: Workbench.askStore, seedTemplates, view: () => states[1], state: () => states };
 }
 const text = n => typeof n === "string" ? n : Array.isArray(n) ? n.map(text).join("") : n && typeof n === "object" ? (n.children || []).map(text).join("") : "";
 // Arrays are flattened the way React flattens them, so a mapped child list is
@@ -74,7 +75,7 @@ test("tool-only consecutive assistant rounds render as one grouped call run", ()
   assert.equal(find(tree, n => n.props?.className === "fz-call").length, 2, "calls remain individually inspectable inside the group");
 });
 
-test("home is a guide: one card per feature, no input, and recent chats and digests", () => {
+test("home prioritizes activity and recent content without repeating feature cards", () => {
   const env = load();
   const { render, dict } = env;
   env.store.seed([{ id: "a", title: "上周做了什么", status: "idle", messages: [], steps: [], updatedAt: Date.now() }]);
@@ -82,24 +83,23 @@ test("home is a guide: one card per feature, no input, and recent chats and dige
   const all = text(tree);
   assert.match(all, new RegExp(dict.wb_heroTitle));
   assert.match(all, /3 个会话/);
-  const cards = find(tree, n => n.props?.className === "fw-cap");
-  assert.deepEqual(cards.map(n => text(n).replace(/\s+/g, "")).map(x => x.length > 0), cards.map(() => true));
-  assert.equal(cards.length, 5, "ask, records, digests, rooms, focus guard");
+  assert.equal(find(tree, n => n.props?.className === "fw-caps" || n.props?.className === "fw-cap").length, 0);
   assert.equal(find(tree, n => n.type === "textarea").length, 0, "nothing is typed on the home page");
   assert.ok(all.includes("上周做了什么"), "the latest chats are listed");
   assert.ok(all.includes(dict.wb_recentChats) && all.includes(dict.wb_recent));
 });
 
-test("the cards open the page they describe, in the same order as the sidebar", () => {
+test("the Focusing brand returns home and the sidebar does not duplicate it", () => {
   const env = load();
-  const tree = env.render(HOME());
-  const cards = find(tree, n => n.props?.className === "fw-cap");
-  const opened = [];
-  // Each card sets the view through the stub state; read which one it picked.
-  for (const card of cards) { env.render(HOME()); card.props.onClick(); opened.push(env.view()); }
-  assert.deepEqual(opened, ["ask", "records", "digests", "rooms", "focus"]);
+  const preset = HOME(); preset[1] = "records";
+  const tree = env.render(preset);
+  const brand = find(tree, n => n.props?.className === "fw-brand")[0];
+  assert.equal(brand.type, "button");
+  assert.equal(text(brand), "Focusing");
+  brand.props.onClick();
+  assert.equal(env.view(), "home");
   const nav = find(env.render(HOME()), n => String(n.props?.className ?? "").startsWith("fw-nav-item")).map(n => n.props.title);
-  assert.deepEqual(nav, [env.dict.wb_home, env.dict.wb_ask, env.dict.wb_records, env.dict.wb_digests, env.dict.wb_rooms, env.dict.wb_focus]);
+  assert.deepEqual(nav, [env.dict.todo_pageTitle, env.dict.wb_ask, env.dict.wb_records, env.dict.wb_digests, env.dict.wb_rooms, env.dict.wb_focus]);
 });
 
 test("the Ask page is the thread and one input; the conversation list lives in the sidebar", () => {
@@ -237,21 +237,33 @@ test("many conversations are grouped by day, each group shows a few, and folding
   assert.equal(find(folded, n => n.props?.className === "fw-nav-group-head")[1].props["aria-expanded"], false);
 });
 
-test("the thread header keeps the title and delete, without a second list", () => {
+test("the native thread header offers archive and keeps the chat open until the Host confirms", async () => {
   const env = load();
   const { render, dict } = env;
-  env.store.seed([{ id: "a", title: "第一个话题", status: "idle", messages: [user("q"), asst("a")], steps: [] }]);
+  env.store.seed([{ id: "a", native: true, range: "last-7d", title: "第一个话题", status: "idle", messages: [user("q"), asst("a")], steps: [] }]);
   env.store.pick("a");
   const tree = render([0, "ask", null, null, "", [], "", "", null]);
   const head = find(tree, n => n.props?.className === "fw-chat-head")[0];
-  assert.ok(text(head).includes("第一个话题"), "the open chat is named");
-  const remove = find(head, n => n.type === "button" && text(n) === dict.askDelete);
-  assert.equal(remove.length, 1, "delete offers itself once");
-  assert.equal(find(head, n => n.type === "button" && [dict.askArchive, dict.askUnarchive].includes(text(n))).length, 0, "archive is not duplicated in the Ask header");
-  remove[0].props.onClick();
-  assert.equal(env.store.active(), undefined, "delete immediately closes the open thread");
-  assert.match(/\.fw-chat-head\{[^}]*-webkit-app-region:no-drag/.exec(SOURCE)?.[0] ?? "", /no-drag/, "window dragging cannot swallow the delete click");
-  // The narrow-panel select stays in the tree but is not a second visible list.
+  assert.ok(text(head).includes("第一个话题"));
+  assert.equal(find(tree, n => n.props?.className === "fw-chat-range")[0].props.disabled, true);
+  const [archive] = find(head, n => n.type === "button" && text(n) === dict.askArchive);
+  assert.ok(archive);
+  assert.equal(find(head, n => n.type === "button" && text(n) === dict.askDelete).length, 0);
+  const oldFetch = globalThis.fetch;
+  let finish;
+  globalThis.fetch = async (path, init) => {
+    assert.equal(path, "/api/dsh-focusing.native-ask");
+    assert.deepEqual(JSON.parse(init.body), { action: "archive", id: "a" });
+    return new Promise(resolve => { finish = resolve; });
+  };
+  try {
+    const pending = archive.props.onClick();
+    assert.equal(env.store.active().id, "a");
+    finish({ ok: true, json: async () => ({ ok: true }) });
+    await pending;
+    assert.equal(env.store.active(), undefined);
+  } finally { globalThis.fetch = oldFetch; }
+  assert.match(/\.fw-chat-head\{[^}]*-webkit-app-region:no-drag/.exec(SOURCE)?.[0] ?? "", /no-drag/);
   assert.equal(find(head, n => n.type === "button" && /^fw-nav-chat/.test(String(n.props?.className ?? ""))).length, 0);
 });
 
@@ -402,12 +414,13 @@ test("the records page draws the last list at once, before the request returns",
 });
 
 test("a DSH record continues as a copied session; a Codex record opens a draft in DSH", async () => {
-  const env = load({ uiWorkspace: {
+  const draft = draftServices();
+  const env = load({ ...draft.services, uiWorkspace: {
+    ...draft.services.uiWorkspace,
     forkSession: async id => { env.forked.push(id); return "child"; },
-    openSession: id => env.forked.push(`open:${id}`),
-    startSession: (workspace, options) => env.drafts.push({ workspace, options }),
+    openSession: id => { env.forked.push(`open:${id}`); draft.calls.push(['open', id]); },
   } });
-  env.forked = []; env.drafts = [];
+  env.forked = [];
   const { dict } = env;
   const dsh = { id: "s1", title: "修复登录", cwd: "/w/app", gist: "g", turns: 2, calls: 5, lastAt: Date.now() };
   const codex = { id: "codex:1", source: "codex", title: "旧 Codex 会话", cwd: "/w/app", gist: "c", turns: 3, calls: 7, lastAt: Date.now() - 1000 };
@@ -431,9 +444,10 @@ test("a DSH record continues as a copied session; a Codex record opens a draft i
   })();
   const carry = find(codexView, n => n.type === "button" && text(n) === dict.wb_continueCodex);
   assert.equal(carry.length, 1, "a Codex session offers its own label");
-  carry[0].props.onClick();
-  assert.equal(env.drafts.length, 1);
-  assert.equal(env.drafts[0].workspace, "/w/app", "the new DSH chat starts in the same working directory");
+  await carry[0].props.onClick();
+  assert.deepEqual(draft.calls.filter(([kind]) => kind === 'workspace'), [['workspace', { path: '/w/app' }]]);
+  assert.deepEqual(draft.calls.filter(([kind]) => kind === 'create'), [['create', { workspaceId: 'ws-registered' }]], 'directory is resolved before creating a new identity');
+  assert.equal(draft.calls.some(([kind]) => kind === 'draft'), false, 'external record continuation opens an empty composer');
   assert.equal(find(codexView, n => n.type === "button" && text(n) === dict.wb_continueContext).length, 0, "a Codex session is never forked");
 });
 
@@ -532,6 +546,8 @@ test("the top bar keeps the gear on the name's row; the sheet never lets it wrap
   assert.match(bar, /align-items:center/);
   assert.ok(!/flex-wrap:wrap/.test(bar), "the gear never wraps onto its own line");
   assert.match(rule(".fw-gear"), /flex:0 0 auto/, "and cannot be squeezed out of the row");
+  assert.match(rule(".fw-brand"), /font-size:20px/, "the brand reads as a title, not another navigation row");
+  assert.match(rule(".fw-brand"), /font-weight:700/, "the brand keeps a strong title weight");
   const narrow = /@container\(max-width:760px\)\{\.fw\{[^\n]*/.exec(SOURCE)?.[0] ?? "";
   assert.ok(!/\.fw-brandbar\{flex-direction:column/.test(narrow), "the drawer keeps the full horizontal header");
 });
@@ -605,6 +621,28 @@ test("a conversation shows the thread: questions, answers, and tool calls folded
   assert.equal(runDetails(tree).length, 1);
   assert.equal(runDetails(tree)[0].props.open, false, "collapsed once finished");
   assert.ok(all.includes("p/m"), "the model that answered is named");
+});
+
+test("Ask shows saved coverage beside the round it describes", () => {
+  const env = load();
+  const conv = {
+    id: "ask-coverage", title: "Find the work", status: "idle", steps: [],
+    messages: [user("Find the work"), asst("The session mentions a fix."), user("What else?"), user("Check again"), asst("The fix was in dsh-focusing.")],
+    rounds: [
+      { at: 1, coverage: "partial", reasons: ["list-pagination", "source-warning"] },
+      { at: 2, coverage: "no-evidence", reasons: ["no-matches"] },
+      { at: 4, coverage: "partial", reasons: ["list-pagination"], reused: true },
+    ],
+  };
+  const tree = chatViews(env.render(withAsks([conv], env)))[0];
+  const notices = find(tree, n => n.props?.className?.startsWith("fw-ask-coverage"));
+  assert.deepEqual(notices.map(n => text(n)), [
+    ["askPartial", "askCoverageListPagination", "askCoverageSourceWarning"].map(k => env.dict[k]).join(" · "),
+    ["askNoEvidence", "askCoverageNoMatches"].map(k => env.dict[k]).join(" · "),
+    ["askReused", "askCoverageListPagination"].map(k => env.dict[k]).join(" · "),
+  ]);
+  assert.equal(notices[1].props.role, "alert");
+  assert.ok(text(tree).indexOf(env.dict.askNoEvidence) < text(tree).indexOf("Check again"));
 });
 
 test("a running turn says so and keeps its calls open so the work is visible", () => {
@@ -751,4 +789,329 @@ test("your own template can be edited and deleted; the shipped ones offer neithe
   find(again, n => n.type === "button" && n.props?.["aria-label"] === dict.wb_delete)[0].props.onClick();
   assert.deepEqual(posts.at(-1), { action: "delete", id: "tpl-1" });
   assert.equal(find(rows[0], n => n.type === "button" && n.props?.["aria-label"] === dict.wb_delete).length, 0, "a shipped template has no delete");
+});
+
+// Service doubles deliberately expose the obsolete/send APIs as failures: none
+// of these actions may reuse a chat or submit text to a model.
+function draftServices({ workspaceId = 'ws-registered', create, ready, result = 'applied' } = {}) {
+  const calls = [], binding = { sessionId: 'fresh-1', composer: {} };
+  let serial = 0;
+  const forbidden = () => assert.fail('draft actions must never send or reuse a session');
+  const services = {
+    workspaces: { create: async options => { calls.push(['workspace', options]); return { workspaceId }; } },
+    sessions: {
+      create: async options => { calls.push(['create', options]); return create ? create(options) : `fresh-${++serial}`; },
+      retain: (id, options) => { calls.push(['retain', id, options]); return {
+        ready: ready ? ready(binding) : Promise.resolve(binding), release: () => calls.push(['release', id]),
+      }; },
+    },
+    conversation: { input: {
+      requestDraftInitialization: (actual, options) => { calls.push(['draft', actual, options]); return result; },
+      send: forbidden, submit: forbidden,
+    } },
+    uiWorkspace: { openSession: id => calls.push(['open', id]), startSession: forbidden },
+  };
+  return { calls, binding, services };
+}
+const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
+const draftButton = (tree, env) => find(tree, n => n.type === 'button' && text(n) === env.dict.wb_draftOpen)[0];
+const handoffDigest = extra => ({ ...digest, kind: 'handoff', range: { key: 'session' }, sessionIds: ['claude:one / two'], ...extra });
+const resultState = saved => [0, 'result', saved.id, saved, '', [], '', '', null];
+const advisorButton = (tree, env) => find(tree, n => n.type === 'button' && text(n) === env.dict.wb_advisorOpen)[0];
+const advisorPrepared = () => ({ ok: true, snapshot: { id: 'snapshot-1', source: { cwd: '/frozen/source' } }, prompt: '# Handoff\n\nConsult history when needed.' });
+const flushDraft = () => new Promise(resolve => setImmediate(resolve));
+function mockAdvisor(t, calls, respond = body => body.action === 'prepare' ? advisorPrepared() : { ok: true }) {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async (url, options) => {
+    // Plugin mounting may also read interface settings; only advisor traffic is recorded.
+    if (url === '/api/dsh-focusing.settings') return { ok: true, json: async () => ({ ok: true }) };
+    assert.equal(url, '/api/dsh-focusing.history-advisor');
+    assert.equal(options.method, 'POST');
+    assert.equal(options.credentials, 'same-origin');
+    assert.equal(options.headers['content-type'], 'application/json');
+    const body = JSON.parse(options.body);
+    calls.push(['advisor', body]);
+    const response = await respond(body);
+    return { ok: true, json: async () => response };
+  };
+}
+
+test('history advisor prepares, waits for ready and attach, then opens an unsent kept draft', async t => {
+  const ready = deferred(), attached = deferred();
+  const stub = draftServices({ ready: () => ready.promise });
+  mockAdvisor(t, stub.calls, body => body.action === 'prepare' ? advisorPrepared() : attached.promise);
+  const env = load(stub.services), saved = handoffDigest();
+  const tree = env.render(resultState(saved));
+  const button = advisorButton(tree, env);
+  assert.equal(text(button), '带历史顾问继续（草稿）');
+  assert.ok(draftButton(tree, env), 'ordinary draft action remains available beside the advisor');
+  const pending = button.props.onClick();
+  await flushDraft();
+  const prepare = ['advisor', { action: 'prepare', digestId: saved.id, locale: /^en/i.test(navigator.language || '') ? 'en' : 'zh' }];
+  assert.deepEqual(stub.calls, [prepare, ['workspace', { path: '/frozen/source' }], ['create', { workspaceId: 'ws-registered' }], ['retain', 'fresh-1', { source: 'controllerOperation' }]], 'attach cannot run before the retained binding is ready');
+  ready.resolve(stub.binding);
+  await flushDraft();
+  assert.deepEqual(stub.calls.at(-1), ['advisor', { action: 'attach', sessionId: 'fresh-1', snapshotId: 'snapshot-1' }]);
+  assert.equal(stub.calls.some(([kind]) => ['draft', 'open', 'release'].includes(kind)), false, 'attach must finish before draft initialization');
+  attached.resolve({ ok: true });
+  assert.equal(await pending, true);
+  assert.deepEqual(stub.calls.map(([kind]) => kind), ['advisor', 'workspace', 'create', 'retain', 'advisor', 'draft', 'open', 'release']);
+  assert.deepEqual(stub.calls.slice(-3), [
+    ['draft', stub.binding, { prompt: advisorPrepared().prompt, whenDraftExists: 'keep' }],
+    ['open', 'fresh-1'], ['release', 'fresh-1'],
+  ]); // send/submit/startSession are forbidden by draftServices.
+});
+
+for (const phase of ['prepare', 'attach']) {
+  for (const failure of ['response', 'network']) {
+    test(`history advisor ${phase} ${failure} failure reports error without opening`, async t => {
+      const stub = draftServices();
+      mockAdvisor(t, stub.calls, body => {
+        if (body.action !== phase) return advisorPrepared();
+        if (failure === 'network') throw new Error(`${phase} offline`);
+        return { ok: false, detail: `${phase} refused` };
+      });
+      const env = load(stub.services);
+      assert.equal(await advisorButton(env.render(resultState(handoffDigest())), env).props.onClick(), false);
+      const kinds = stub.calls.map(([kind]) => kind);
+      assert.deepEqual(kinds, phase === 'prepare' ? ['advisor'] : ['advisor', 'workspace', 'create', 'retain', 'advisor', 'release']);
+      assert.ok(text(env.rerender()).includes(`${phase} ${failure === 'network' ? 'offline' : 'refused'}`));
+      assert.equal(advisorButton(env.rerender(), env).props.disabled, false, 'failure clears the guard for retry');
+    });
+  }
+}
+
+for (const [missing, payload] of [
+  ['snapshot', { ok: true, prompt: 'context' }],
+  ['snapshot id', { ok: true, snapshot: { source: { cwd: '/source' } }, prompt: 'context' }],
+  ['source', { ok: true, snapshot: { id: 'snap' }, prompt: 'context' }],
+  ['cwd', { ok: true, snapshot: { id: 'snap', source: {} }, prompt: 'context' }],
+  ['blank cwd', { ok: true, snapshot: { id: 'snap', source: { cwd: '  ' } }, prompt: 'context' }],
+  ['prompt', { ok: true, snapshot: { id: 'snap', source: { cwd: '/source' } } }],
+  ['blank prompt', { ...advisorPrepared(), prompt: ' \n ' }],
+]) {
+  test(`history advisor rejects missing ${missing} before session creation or attach`, async t => {
+    const stub = draftServices();
+    mockAdvisor(t, stub.calls, () => payload);
+    const env = load(stub.services);
+    assert.equal(await advisorButton(env.render(resultState(handoffDigest())), env).props.onClick(), false);
+    assert.deepEqual(stub.calls.map(([kind]) => kind), ['advisor']);
+    assert.ok(text(env.rerender()).includes(env.dict.wb_draftFailed));
+  });
+}
+
+for (const phase of ['prepare', 'attach']) {
+  test(`history advisor duplicate clicks are guarded while ${phase} is pending, including ordinary draft clicks`, async t => {
+    const gate = deferred(), stub = draftServices();
+    mockAdvisor(t, stub.calls, body => body.action === phase ? gate.promise : advisorPrepared());
+    const env = load(stub.services), tree = env.render(resultState(handoffDigest()));
+    const button = advisorButton(tree, env), ordinary = draftButton(tree, env);
+    const pending = button.props.onClick();
+    await flushDraft();
+    await button.props.onClick();
+    await ordinary.props.onClick();
+    const busy = find(env.rerender(), n => n.type === 'button' && text(n) === env.dict.wb_draftOpening);
+    assert.equal(busy.length, 2);
+    for (const action of busy) { assert.equal(action.props.disabled, true); await action.props.onClick(); }
+    gate.resolve(phase === 'prepare' ? advisorPrepared() : { ok: true });
+    assert.equal(await pending, true);
+    assert.deepEqual(stub.calls.filter(([kind]) => kind === 'advisor').map(([, body]) => body.action), ['prepare', 'attach']);
+    assert.equal(stub.calls.filter(([kind]) => kind === 'create').length, 1);
+    assert.equal(advisorButton(env.rerender(), env).props.disabled, false);
+    assert.equal(draftButton(env.rerender(), env).props.disabled, false);
+  });
+}
+
+for (const extra of [{ kind: 'weekly' }, { range: { key: 'this-week' } }, { sessionIds: [] }, { sessionIds: undefined }, { sessionIds: ['one', 'two'] }, { status: 'running' }, { status: 'failed' }, { note: 'empty' }]) {
+  test(`history advisor is hidden for ineligible handoff: ${JSON.stringify(extra)}`, () => {
+    const env = load(draftServices().services);
+    assert.equal(advisorButton(env.render(resultState(handoffDigest(extra))), env), undefined);
+  });
+}
+
+for (const [directory, workspaceId] of [['/existing/project', 'ws-existing'], ['/new/project', 'ws-new']]) {
+  test(`draft creation delegates directory registration/reuse to workspaces.create: ${directory}`, async () => {
+    const stub = draftServices({ workspaceId });
+    const env = load(stub.services);
+    const actual = await env.startDraft({ cwd: directory }, 'unsent context');
+    assert.deepEqual(actual, { sessionId: 'fresh-1', workspaceId });
+    assert.deepEqual(stub.calls, [
+      ['workspace', { path: directory }], ['create', { workspaceId }],
+      ['retain', 'fresh-1', { source: 'controllerOperation' }],
+      ['draft', stub.binding, { prompt: 'unsent context', whenDraftExists: 'keep' }],
+      ['open', 'fresh-1'], ['release', 'fresh-1'],
+    ]);
+    await env.startDraft({ cwd: directory });
+    assert.deepEqual(stub.calls.filter(([kind]) => kind === 'open').map(x => x[1]), ['fresh-1', 'fresh-2'], 'every request creates a separate identity');
+  });
+}
+
+test('async create and readiness finish before draft initialization and opening', async () => {
+  const created = deferred(), ready = deferred();
+  const stub = draftServices({ create: () => created.promise, ready: () => ready.promise });
+  const env = load(stub.services);
+  const operation = env.startDraft({ workspaceId: 'room-workspace' }, 'handoff');
+  assert.deepEqual(stub.calls, [['create', { workspaceId: 'room-workspace' }]], 'known workspace IDs bypass path registration');
+  created.resolve('async-session');
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(stub.calls.some(([kind]) => kind === 'open' || kind === 'draft'), false);
+  ready.resolve(stub.binding);
+  await operation;
+  assert.deepEqual(stub.calls.slice(-3), [['draft', stub.binding, { prompt: 'handoff', whenDraftExists: 'keep' }], ['open', 'async-session'], ['release', 'async-session']]);
+});
+
+for (const failure of ['create', 'ready', 'preserved', 'blocked']) {
+  test(`draft ${failure} failure never opens and releases any acquired reference`, async () => {
+    const stub = draftServices({
+      create: failure === 'create' ? async () => { throw new Error('create failed'); } : undefined,
+      ready: failure === 'ready' ? async () => { throw new Error('ready failed'); } : undefined,
+      result: failure,
+    });
+    const env = load(stub.services);
+    await assert.rejects(env.startDraft({ workspaceId: 'ws' }, 'do not overwrite'), error => {
+      assert.equal(error.message, failure === 'create' || failure === 'ready' ? `${failure} failed` : env.dict[failure === 'preserved' ? 'wb_draftExists' : 'wb_draftUnavailable']);
+      return true;
+    });
+    assert.equal(stub.calls.some(([kind]) => kind === 'open'), false);
+    assert.equal(stub.calls.filter(([kind]) => kind === 'release').length, failure === 'create' ? 0 : 1);
+    if (failure === 'preserved' || failure === 'blocked') assert.equal(stub.calls.find(([kind]) => kind === 'draft')[2].whenDraftExists, 'keep');
+  });
+}
+
+for (const source of ['codex', 'claude']) {
+  test(`${source} record resolves cwd and opens a new empty composer`, async () => {
+    const stub = draftServices(), env = load(stub.services);
+    const rec = { id: `${source}:1`, source, title: 'external', cwd: `/w/${source}`, lastAt: Date.now() };
+    const records = { ok: true, records: [rec], stats: {}, range: {}, projects: [], workspaces: [rec.cwd] };
+    let tree = env.render([0, 'records', null, null, '', [], '', '', null, '', false, '', 'this-week', '', '', '', records, '', rec.id, {}]);
+    find(tree, n => n.type === 'button' && String(n.props.className).startsWith('fw-src') && text(n).includes(env.dict[source === 'codex' ? 'wb_sourceCodex' : 'wb_sourceClaude']))[0].props.onClick();
+    tree = env.rerender();
+    find(tree, n => n.props.className === 'fw-rec-btn')[0].props.onClick();
+    tree = env.rerender();
+    await find(tree, n => n.type === 'button' && text(n) === env.dict.wb_continueCodex)[0].props.onClick();
+    assert.deepEqual(stub.calls[0], ['workspace', { path: rec.cwd }]);
+    assert.deepEqual(stub.calls[1], ['create', { workspaceId: 'ws-registered' }]);
+    assert.equal(stub.calls.some(([kind]) => kind === 'draft'), false);
+    assert.deepEqual(stub.calls.slice(-2), [['open', 'fresh-1'], ['release', 'fresh-1']]);
+  });
+}
+
+for (const fallback of [false, true]) {
+  test(`single-session handoff imports the exported Markdown, including model fallback=${fallback}`, async t => {
+    const stub = draftServices(), env = load(stub.services), requests = [];
+    const markdown = '# Handoff\n\nEvidence and next steps\n';
+    const original = globalThis.fetch;
+    t.after(() => { globalThis.fetch = original; });
+    globalThis.fetch = async (url, options) => {
+      requests.push([url, options]);
+      return url.includes('export') ? { ok: true, text: async () => markdown } : { ok: true, json: async () => ({ ok: true, record: { cwd: '/source/project' } }) };
+    };
+    const saved = handoffDigest({ draft: fallback, error: fallback ? { reason: 'model unavailable' } : undefined });
+    await draftButton(env.render(resultState(saved)), env).props.onClick();
+    assert.equal(requests.length, 2);
+    assert.equal(new URL(requests[0][0], 'https://local').searchParams.get('id'), saved.sessionIds[0]);
+    assert.match(requests[1][0], /export/);
+    assert.equal(new URL(requests[1][0], 'https://local').searchParams.get('id'), saved.id);
+    assert.equal(requests[1][1].credentials, 'same-origin');
+    assert.deepEqual(stub.calls[0], ['workspace', { path: '/source/project' }]);
+    assert.deepEqual(stub.calls.find(([kind]) => kind === 'draft'), ['draft', stub.binding, { prompt: `${env.dict.wb_handoffContext}\n\n${fallback ? `${env.dict.wb_draftNote}\n\n` : ''}${markdown}`, whenDraftExists: 'keep' }]);
+  });
+}
+
+for (const failure of ['source unavailable', 'missing cwd', 'export HTTP', 'export network', 'export empty']) {
+  test(`handoff ${failure} leaves all session services untouched and reports error`, async t => {
+    const stub = draftServices(), env = load(stub.services);
+    const original = globalThis.fetch;
+    t.after(() => { globalThis.fetch = original; });
+    globalThis.fetch = async url => {
+      if (!url.includes('export')) return { ok: true, json: async () => failure === 'source unavailable' ? { ok: false } : { ok: true, record: failure === 'missing cwd' ? {} : { cwd: '/source' } } };
+      if (failure === 'export network') throw new Error('offline');
+      return { ok: failure !== 'export HTTP', status: 503, text: async () => '  ' };
+    };
+    await draftButton(env.render(resultState(handoffDigest())), env).props.onClick();
+    assert.deepEqual(stub.calls, []);
+    assert.ok(text(env.rerender()).includes(env.dict.wb_draftFailed));
+  });
+}
+
+test('handoff duplicate clicks remain guarded across rerenders until creation completes', async t => {
+  const gate = deferred(), stub = draftServices({ create: () => gate.promise }), env = load(stub.services);
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const requests = [];
+  globalThis.fetch = async url => { requests.push(url); return url.includes('export') ? { ok: true, text: async () => '# context' } : { ok: true, json: async () => ({ ok: true, record: { cwd: '/source' } }) }; };
+  const button = draftButton(env.render(resultState(handoffDigest())), env);
+  const pending = button.props.onClick();
+  await button.props.onClick();
+  const busy = find(env.rerender(), n => n.type === 'button' && text(n) === env.dict.wb_draftOpening)[0];
+  assert.equal(busy.props.disabled, true);
+  await busy.props.onClick();
+  gate.resolve('only-session');
+  await pending;
+  assert.equal(requests.length, 2);
+  assert.equal(stub.calls.filter(([kind]) => kind === 'create').length, 1);
+  assert.equal(draftButton(env.rerender(), env).props.disabled, false);
+});
+
+for (const target of [{ ok: true, workspaceId: 'known-room' }, { ok: true, workspaceId: null, cwd: '/room/project' }, { ok: false, reason: 'target unavailable' }, { ok: true }]) {
+  test(`room handoff validates target and resolves directory fallback: ${JSON.stringify(target)}`, async t => {
+    const stub = draftServices(), env = load(stub.services), actions = [];
+    const room = { id: 'room-1', title: 'room', participants: [], messages: [], handoff: { text: '# room handoff' } };
+    const original = globalThis.fetch;
+    t.after(() => { globalThis.fetch = original; });
+    globalThis.fetch = async (url, options) => {
+      const body = JSON.parse(options.body); actions.push(body);
+      return { ok: true, json: async () => body.action === 'target' ? target : { ok: true, room } };
+    };
+    const tree = env.render([...base('room'), [], room.id, room, '', null, null, null, '', false]);
+    await find(tree, n => n.type === 'button' && text(n) === env.dict.wb_openNew)[0].props.onClick();
+    if (target.ok && (target.cwd || target.workspaceId)) {
+      assert.deepEqual(stub.calls.find(([kind]) => kind === 'create'), ['create', { workspaceId: target.workspaceId || 'ws-registered' }]);
+      assert.deepEqual(stub.calls.filter(([kind]) => kind === 'workspace'), target.cwd ? [['workspace', { path: target.cwd }]] : []);
+      assert.equal(stub.calls.find(([kind]) => kind === 'draft')[2].prompt, room.handoff.text);
+      assert.deepEqual(actions.map(x => x.action), ['target', 'opened']);
+    } else {
+      assert.deepEqual(stub.calls, []);
+      assert.deepEqual(actions.map(x => x.action), ['target']);
+      assert.ok(text(env.rerender()).includes(env.dict.wb_draftFailed));
+    }
+  });
+}
+
+test('handoff errors stay with the digest that failed, rather than another digest or room', async t => {
+  const stub = draftServices(), env = load(stub.services);
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: false }) });
+  await draftButton(env.render(resultState(handoffDigest())), env).props.onClick();
+  assert.ok(text(env.rerender()).includes(env.dict.wb_draftFailed));
+  // Change the selected digest while preserving the other hook states, as navigation does.
+  env.state()[2] = 'other'; env.state()[3] = handoffDigest({ id: 'other' });
+  assert.equal(text(env.rerender()).includes(env.dict.wb_draftFailed), false);
+  env.state()[1] = 'room'; env.state()[26] = 'r2'; env.state()[27] = { id: 'r2', title: 'other room', participants: [], messages: [], handoff: { text: 'other' } };
+  assert.equal(text(env.rerender()).includes(env.dict.wb_draftFailed), false);
+});
+
+for (const extra of [{ kind: 'weekly' }, { range: { key: 'this-week' } }, { sessionIds: ['one', 'two'] }, { status: 'running' }, { note: 'empty' }]) {
+  test(`handoff draft action is unavailable outside a completed nonempty single-session handoff: ${JSON.stringify(extra)}`, () => {
+    const env = load(draftServices().services);
+    assert.equal(draftButton(env.render(resultState(handoffDigest(extra))), env), undefined);
+  });
+}
+
+test('retry after source-reading failure preserves the requested session before sessionIds exist', async t => {
+  const env = load(), original = globalThis.fetch, requests = [];
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async (url, options) => {
+    requests.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ ok: true, digest: { id: 'retry', status: 'running' } }) };
+  };
+  const saved = handoffDigest({ status: 'failed', session: 'codex:source-reading-failed', sessionIds: undefined, error: { reason: 'source read failed' } });
+  const tree = env.render(resultState(saved));
+  await find(tree, n => n.type === 'button' && text(n) === env.dict.wb_retry)[0].props.onClick();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].session, saved.session);
+  assert.equal(requests[0].range, 'session');
+  assert.equal(requests[0].rangeLocked, true);
 });

@@ -53,11 +53,11 @@ test("clicking a record tag toggles the AND filter and its removable scope chip"
   assert.ok(workspace, "the canonical workspace tag is rendered on the record");
   workspace.props.onClick({ stopPropagation() {} });
   const filtered = env.rerender();
-  assert.deepEqual(env.state().at(-1), ["workspace:/w/app"]);
+  assert.deepEqual(find(filtered, n => n.type === "button" && n.props?.["aria-label"]?.endsWith(" ×")).map(n => n.props["aria-label"]), ["workspace:/w/app ×"]);
   const selected = find(filtered, n => n.type === "button" && n.props?.["aria-label"] === "workspace:/w/app ×")[0];
   assert.ok(selected, "the selected scope is visible and removable");
   selected.props.onClick();
-  assert.deepEqual(env.state().at(-1), [], "clicking the selected tag removes it again");
+  assert.equal(find(env.rerender(), n => n.type === "button" && n.props?.["aria-label"]?.endsWith(" ×")).length, 0, "clicking the selected tag removes it again");
 });
 
 test("record detail starts a tagged conversation and send forwards the same scope", async () => {

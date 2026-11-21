@@ -55,10 +55,11 @@ function setup(answer, extra = {}) {
     connection: { fetch: { register: r => { routes.set(r.path, r); return () => {}; } } },
   };
   const settings = normalizeSettings({});
-  registerContextRoutes(child, { ...extra, settingsStore: { get: () => settings }, digestFile: join(dir, `d-${Math.random()}.json`) });
+  const digestFile = extra.digestFile ?? join(dir, `d-${Math.random()}.json`);
+  registerContextRoutes(child, { ...extra, settingsStore: { get: () => settings }, digestFile });
   const call = async (path, init) => (await routes.get(path.split("?")[0]).fetch(new Request(`http://x${path}`, init))).json();
   const post = (path, body) => call(path, { method: "POST", body: JSON.stringify(body) });
-  return { call, post, reads, prompts };
+  return { call, post, reads, prompts, stored, digestFile };
 }
 
 async function waitDone(h, id) {
@@ -69,6 +70,66 @@ async function waitDone(h, id) {
   }
   throw new Error("digest did not finish");
 }
+
+test('snapshot batch retry retains successful calls and frozen scope across restart', async () => {
+  const calls = [];
+  let failOnce = true;
+  const gateway = { complete: async options => {
+    calls.push(options.user);
+    assert.ok(options.system.length + options.user.length <= 20000);
+    if (failOnce) { failOnce = false; return { ok: false, reason: 'timeout', detail: 'test timeout' }; }
+    return { ok: true, text: JSON.stringify({ title: 'Saved batch', summary: 'Concrete saved evidence', projects: [] }), model: 'p/m' };
+  } };
+  const h = setup('', { modelGateway: gateway });
+  for (let i = 0; i < 16; i++) {
+    const id = `bulk-${i}`;
+    h.stored[id] = { header: { id, cwd: '/w/p', createdAt: recentAt }, revision: `bulk:${i}`, events: log(`${i} ${'evidence '.repeat(140)}`, recentAt) };
+  }
+  const start = await h.post('/api/dsh-focusing.digest', { request: 'today', offset: 480 });
+  const partial = await waitDone(h, start.digest.id);
+  assert.equal(partial.partial, true);
+  assert.equal(partial.retryable, true);
+  assert.equal(partial.error.reason, 'timeout');
+  assert.ok(partial.progress.completedBatches > 0);
+  assert.equal(partial.pipeline, undefined, 'polling never sends private frozen batch inputs');
+  assert.equal(partial.frozenSlices, undefined);
+  assert.equal(partial.snapshots.length, 17);
+  const before = calls.length;
+  const successful = new Set(calls.slice(1));
+  const saved = JSON.parse(readFileSync(h.digestFile, 'utf8'));
+  saved.digests[0].status = 'running'; // persisted process interrupted before final state
+  writeFileSync(h.digestFile, JSON.stringify(saved));
+  const reopened = setup('', { digestFile: h.digestFile, modelGateway: gateway });
+  const restored = (await reopened.call(`/api/dsh-focusing.digest?id=${partial.id}`)).digest;
+  assert.equal(restored.status, 'interrupted');
+  assert.equal(restored.retryable, true);
+  const resumed = await reopened.post('/api/dsh-focusing.digest', { action: 'retry', id: partial.id });
+  assert.equal(resumed.digest.id, partial.id);
+  const busy = await reopened.post('/api/dsh-focusing.digest', { action: 'retry', id: partial.id });
+  assert.equal(busy.reason, 'busy');
+  const done = await waitDone(reopened, partial.id);
+  assert.equal(done.partial, false);
+  assert.equal(done.retryable, false);
+  assert.equal(done.progress.completedSessions, 17);
+  assert.equal(reopened.reads.length, 0, 'retry does not reread changed live source catalog');
+  assert.ok(calls.slice(before).every(prompt => !successful.has(prompt)), 'successful model calls are not repeated');
+  assert.deepEqual(done.snapshots, partial.snapshots);
+  assert.equal((await reopened.call('/api/dsh-focusing.digests')).digests.length, 1);
+});
+
+test('corrupt frozen sources stop follow-ups and retries rather than substitute live data', async () => {
+  const h = setup('not json');
+  const start = await h.post('/api/dsh-focusing.digest', { request: 'today', offset: 480 });
+  const done = await waitDone(h, start.digest.id);
+  const snapshotPath = join(`${h.digestFile}.snapshots`, `${done.snapshots[0].id}.json`);
+  writeFileSync(snapshotPath, '{}');
+  const follow = await h.post('/api/dsh-focusing.followup', { id: done.id, question: 'details?' });
+  assert.equal(follow.reason, 'source-unavailable');
+  await h.post('/api/dsh-focusing.digest', { action: 'retry', id: done.id });
+  const retried = await waitDone(h, done.id);
+  assert.equal(retried.status, 'failed');
+  assert.equal(h.prompts.length, 1, 'corrupt retained evidence prevents another model call');
+});
 
 test("records can filter by multiple workspace paths, with an empty filter meaning all", async () => {
   const h = setup("{}");
@@ -185,8 +246,9 @@ test("Codex records participate in listing, detail, digest and follow-up", async
   assert.equal(updated.record.lastReply, 'Codex repair verified after update');
   enabled = false;
   const unavailable = await h.post("/api/dsh-focusing.followup", {id:digest.id, question:"read again"});
-  assert.equal(unavailable.ok, false);
-  assert.equal(unavailable.reason, 'source-unavailable');
+  assert.equal(unavailable.ok, true, 'saved digest follow-ups use frozen evidence even after live import is disabled');
+  assert.match(h.prompts.at(-1), /Codex repair complete/);
+  assert.doesNotMatch(h.prompts.at(-1), /Codex repair verified after update/);
   const disabledList = await h.call("/api/dsh-focusing.records?range=last-7d&offset=480");
   assert.equal(disabledList.records.length, 1);
   const single = await h.post("/api/dsh-focusing.digest", {request:"handoff", session:"codex:cx"});
@@ -241,46 +303,94 @@ test("the activity calendar combines enabled Codex and Claude sources and report
 });
 
 // ---- asking: a short tool loop behind one route -----------------------------
-test("a question runs the tool loop: the model asks for a tool, gets real data, then answers", async () => {
+test("Ask retries an unsupported answer, uses ranked matches, and retains coverage across reload and follow-ups", async () => {
   const requests = [];
-  const turns = [
-    [{ type: "block-end", index: 0, block: { type: "tool-call", id: "c1", name: "focus_list_sessions", arguments: "{}" } }, { type: "finish", reason: { kind: "tool-calls" } }],
-    [{ type: "text-delta", index: 0, text: "有 2 个会话。" }, { type: "finish", reason: { kind: "stop" } }],
-  ];
-  const routes = new Map();
+  const reply = text => [{ type: "text-delta", index: 0, text }, { type: "finish", reason: { kind: "stop" } }];
+  const search = [{ type: "block-end", index: 0, block: { type: "tool-call", id: "c1", name: "focus_list_sessions", arguments: '{"query":"needle","limit":1}' } }, { type: "finish", reason: { kind: "tool-calls" } }];
+  const reuse = reply("[USE_PRIOR_EVIDENCE]\nTwo matches for needle.");
+  const turns = [reply("Unsupported"), search, reply("The archive has two matches for needle."), reuse,
+    reply("Guess"), reply("Still guessing"), reuse, reuse, reply("Guess"), reply("Still guessing")];
+  const stored = new Map(["one", "two"].map((id, index) => {
+    const header = { id, cwd: "/w/p", createdAt: now - 864e5 + index * 1000 };
+    const events = log(id, header.createdAt);
+    events[4].data.message.content[0].text += ` ${"ordinary words ".repeat(400)}needle`;
+    return [id, { header, revision: `rev-${index}`, events }];
+  }));
   const services = {
     sessions: { list: () => [], get: () => undefined },
-    sessionPersistence: { list: async () => [] },
-    sessionQuery: { readSession: async () => ({ session: {}, events: [] }) },
+    sessionPersistence: { list: async () => [...stored.values()].map(({ header, revision }) => ({ header, revision })) },
+    sessionQuery: { readSession: async id => ({ session: stored.get(id).header, events: stored.get(id).events }) },
     agentDefaultModel: { currentSelection: () => ({ provider: "p", model: "m" }) },
     llm: { stream: async function* (req) { requests.push(structuredClone({ ...req, signal: undefined })); for (const c of turns.shift()) yield c; } },
   };
-  const child = { get: n => services[n], effect: fn => fn(), connection: { fetch: { register: r => { routes.set(r.path, r); return () => {}; } } } };
-  const settings = normalizeSettings({});
-  registerContextRoutes(child, { settingsStore: { get: () => settings }, digestFile: join(dir, `a-${Math.random()}.json`) });
-  const call = async (path, init) => (await routes.get(path.split("?")[0]).fetch(new Request(`http://x${path}`, init))).json();
-
-  const started = await call("/api/dsh-focusing.ask", { method: "POST", body: JSON.stringify({ question: "上周做了什么", offset: 480 }) });
+  const digestFile = join(dir, `a-${Math.random()}.json`);
+  const open = () => {
+    const routes = new Map();
+    const child = { get: n => services[n], effect: fn => fn(), connection: { fetch: { register: r => { routes.set(r.path, r); return () => {}; } } } };
+    registerContextRoutes(child, { settingsStore: { get: () => normalizeSettings({}) }, digestFile });
+    return async (path, body) => (await routes.get(path.split("?")[0]).fetch(new Request(`http://x${path}`, body ? { method: "POST", body: JSON.stringify(body) } : {}))).json();
+  };
+  const path = "/api/dsh-focusing.ask";
+  const wait = async (call, id) => {
+    for (let i = 0; i < 50; i++) {
+      const { ask } = await call(`${path}?id=${id}`);
+      if (ask.status !== "running") return ask;
+      await new Promise(r => setTimeout(r, 10));
+    }
+    throw new Error("Ask did not finish");
+  };
+  const call = open();
+  const started = await call(path, { question: "Where was needle mentioned?", offset: 480 });
   assert.equal(started.ok, true);
   assert.equal(started.ask.status, "running");
-  let ask;
-  for (let i = 0; i < 50; i++) {
-    ask = (await call(`/api/dsh-focusing.ask?id=${started.ask.id}`)).ask;
-    if (ask.status !== "running") break;
-    await new Promise(r => setTimeout(r, 10));
-  }
+  const id = started.ask.id;
+  const ask = await wait(call, id);
   assert.equal(ask.status, "idle", JSON.stringify(ask));
-  assert.equal(ask.messages.at(-1).content[0].text, "有 2 个会话。", "the answer is the last message of the thread");
+  assert.equal(ask.messages.at(-1).content[0].text, "The archive has two matches for needle.");
   assert.deepEqual(ask.messages.map(m => m.role), ["user", "assistant", "tool", "assistant"]);
   assert.deepEqual(ask.steps.map(x => x.kind), ["call", "answer"]);
   assert.equal(ask.steps[0].name, "focus_list_sessions");
-  assert.ok(JSON.parse(ask.steps[0].result).total >= 0, "the tool really ran against the index");
-  assert.equal(requests[0].tools.length, 3, "the three tools are offered");
+  const page = JSON.parse(ask.steps[0].result);
+  assert.equal(page.total, 2);
+  assert.equal(page.items.length, 1);
+  assert.ok(page.nextCursor);
+  assert.ok(page.items[0].matches.some(match => match.eventIndex === 4));
+  assert.equal(ask.partial, true);
+  assert.deepEqual(ask.rounds, [{ coverage: "partial", reasons: ["list-pagination"], at: 3 }]);
+  assert.equal(requests[0].tools.length, 3);
   assert.match(requests[0].system, /UTC\+08:00/);
+  assert.match(requests[1].system, /make a tool call now/);
 
-  // Delete forgets the conversation.
-  assert.equal((await call("/api/dsh-focusing.ask", { method: "POST", body: JSON.stringify({ action: "delete", id: ask.id }) })).ok, true);
-  assert.equal((await call(`/api/dsh-focusing.ask?id=${ask.id}`)).reason, "not-found");
+  const reopened = open();
+  assert.deepEqual((await reopened(`${path}?id=${id}`)).ask.rounds, ask.rounds);
+  await reopened(path, { id, question: "Summarize what you found.", offset: 480 });
+  const summary = await wait(reopened, id);
+  assert.equal(summary.messages.at(-1).content[0].text, "Two matches for needle.");
+  assert.deepEqual(summary.steps.map(step => step.kind), ["answer"]);
+  assert.deepEqual(summary.rounds.at(-1), { coverage: "partial", reasons: ["list-pagination"], at: 5, reused: true });
+  assert.deepEqual(requests[3].messages.map(message => message.role), ["user", "assistant", "tool", "assistant", "user"]);
+  assert.match(requests[3].system, /answer directly without calling tools/);
+  assert.equal(requests.length, 4);
+
+  await reopened(path, { id, question: "Which other project?", offset: 480 });
+  const follow = await wait(reopened, id);
+  assert.equal(follow.reason, "no-evidence");
+  assert.deepEqual(follow.rounds.at(-1), { coverage: "no-evidence", reasons: [], at: 6 });
+  assert.equal(follow.messages.at(-1).content[0].text, "Which other project?");
+
+  await reopened(path, { id, question: "What did I do all time?", range: "all", offset: 480 });
+  const changed = await wait(reopened, id);
+  assert.equal(changed.reason, "no-evidence", "a scope change rejects an attempt to reuse evidence");
+  assert.doesNotMatch(requests[6].system, /answer directly without calling tools/);
+  await reopened(path, { id, question: "Can you narrow that down?", offset: 480 });
+  const narrowed = await wait(reopened, id);
+  assert.equal(narrowed.range, "all", "follow-ups inherit the selected range when absent");
+  assert.deepEqual(requests[6].messages.map(message => message.role), ["user"]);
+  assert.ok(!JSON.stringify(requests[8].messages).includes("The archive has two matches"));
+  assert.equal(narrowed.rounds[2].at, 6, "each unanswered question keeps its own outcome");
+  assert.equal(narrowed.messages[6].content[0].text, "Which other project?");
+  assert.equal((await reopened(path, { action: "delete", id })).ok, true);
+  assert.equal((await reopened(`${path}?id=${id}`)).reason, "not-found");
 });
 
 test("an empty question is refused, and an external endpoint says it is not supported", async () => {

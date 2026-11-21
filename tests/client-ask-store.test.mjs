@@ -15,9 +15,11 @@ function load(host) {
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     const u = new URL(url, "http://x");
-    calls.push(`${options.method ?? "GET"} ${u.search || ""}`.trim());
+    assert.equal(u.pathname, "/api/dsh-focusing.native-ask");
+    const method = options.method ?? "GET";
     const body = options.body ? JSON.parse(options.body) : {};
-    return { ok: true, json: async () => host(u, options.method ?? "GET", body) };
+    calls.push({ method, search: u.search, body });
+    return { ok: true, json: async () => host(u, method, body) };
   };
   new Function(SOURCE)();
   const React = { createElement: () => null, Fragment: "F", useEffect: () => {}, useRef: v => ({ current: v }), useCallback: f => f, useState: i => [i, () => {}] };
@@ -34,13 +36,27 @@ function fakeHost(initial = []) {
   const host = (u, method, body) => {
     const id = u.searchParams.get("id");
     if (method === "POST") {
-      if (body.action === "stop") { const a = asks.get(body.id); if (a?.status === "running") a.status = "cancelled"; return { ok: !!a }; }
+      if (body.action === "stop") {
+        const a = asks.get(body.id);
+        if (a && ["queued", "running"].includes(a.status)) a.status = "cancelled";
+        return { ok: !!a };
+      }
       if (body.action === "delete") return { ok: asks.delete(body.id) };
+      if (body.action === "archive") {
+        const a = asks.get(body.id);
+        if (a?.native) a.archived = true;
+        return { ok: !!a?.archived, ask: a };
+      }
       let a = body.id ? asks.get(body.id) : undefined;
       if (body.id && !a) return { ok: false, reason: "not-found" };
-      if (!a) { a = { id: `ask-${asks.size + 1}`, title: body.question, steps: [], messages: [], createdAt: Date.now() }; asks.set(a.id, a); }
+      if (a?.readOnly) return { ok: false, reason: "read-only" };
+      if (a && ((body.range && body.range !== a.range) || (body.tags && String(body.tags) !== String(a.tags)))) return { ok: false, reason: "scope-fixed" };
+      if (!a) {
+        a = { native: true, id: `ask-${asks.size + 1}`, title: body.question, range: body.range, tags: body.tags, messages: [], createdAt: Date.now() };
+        asks.set(a.id, a);
+      }
       a.messages = [...a.messages, user(body.question)];
-      a.status = "running"; a.updatedAt = Date.now();
+      a.status = "queued"; a.updatedAt = Date.now();
       return { ok: true, ask: { ...a } };
     }
     if (id) { const a = asks.get(id); return a ? { ok: true, ask: { ...a } } : { ok: false, reason: "not-found" }; }
@@ -65,27 +81,40 @@ test("past conversations come back from the Host when the page opens", async () 
 
 test("the next question continues the open conversation; new chat starts another", async () => {
   const { asks, host } = fakeHost();
-  const { store } = load(host);
-  const leave = store.subscribe(() => {});
-  await tick(10);
+  const { store, calls } = load(host);
+  await store.reload();
+  store.setTags(["project:app"]);
   await store.send("第一个问题");
   assert.equal(store.activeId(), "ask-1", "the new conversation becomes the open one");
+  const posts = () => calls.filter(call => call.method === "POST").map(call => call.body);
+  const time = { offset: -new Date().getTimezoneOffset(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+  assert.deepEqual(posts()[0], { question: "第一个问题", range: "last-30d", tags: ["project:app"], ...time });
 
   asks.get("ask-1").status = "idle";
-  await store.send("追问");
+  await store.reload();
+  store.setRange("all");
+  store.setTags([]);
+  assert.equal(store.range(), "last-30d");
+  assert.deepEqual(store.tags(), ["project:app"]);
+  assert.equal(await store.send("追问"), true);
+  assert.deepEqual(posts()[1], { question: "追问", id: "ask-1", ...time });
   assert.equal(asks.size, 1, "a follow-up joins the same conversation");
   assert.equal(asks.get("ask-1").messages.length, 2);
-  assert.equal(store.get().length, 1);
 
   store.newChat();
   assert.equal(store.active(), undefined, "nothing is open");
-  await store.send("换个话题");
+  store.setRange("all");
+  store.setTags([]);
+  assert.equal(await store.send("换个话题"), true);
+  assert.deepEqual(posts()[2], { question: "换个话题", range: "all", tags: [], ...time });
   assert.equal(asks.size, 2, "now it is a second conversation");
   assert.equal(store.activeId(), "ask-2");
 
   store.pick("ask-1");
   assert.equal(store.active().title, "第一个问题", "switching back shows the first thread");
-  leave();
+  assert.equal(store.range(), "last-30d");
+  await store.stop("ask-1");
+  await store.stop("ask-2");
 });
 
 test("a running turn keeps being polled after every subscriber has left", async () => {
@@ -94,12 +123,16 @@ test("a running turn keeps being polled after every subscriber has left", async 
   const leave = store.subscribe(() => {});
   await tick(10);
   await store.send("上周做了什么");
-  assert.equal(store.get()[0].status, "running");
+  assert.equal(store.get()[0].status, "queued");
 
   leave();                                              // the Workbench unmounted
-  asks.get("ask-1").steps = [{ kind: "call", name: "focus_list_sessions", status: "done" }];
+  const toolCall = { type: "tool-call", id: "call-1", name: "focus_list_sessions", arguments: {} };
+  asks.get("ask-1").status = "running";
+  asks.get("ask-1").messages = [user("上周做了什么"), { role: "assistant", content: [toolCall] }];
   await tick(1100);
-  assert.equal(store.get()[0].steps.length, 1, "progress was recorded while away");
+  assert.equal(store.get()[0].status, "running");
+  assert.deepEqual(store.get()[0].messages[1].content, [toolCall], "native tool messages were recorded while away");
+  assert.ok(calls.some(call => call.method === "GET" && call.search === "?id=ask-1"));
 
   Object.assign(asks.get("ask-1"), { status: "idle", messages: [user("上周做了什么"), { role: "assistant", content: [{ type: "text", text: "做了登录修复。" }] }] });
   await tick(1100);
@@ -109,22 +142,53 @@ test("a running turn keeps being polled after every subscriber has left", async 
   assert.equal(calls.length, after, "polling stops once nothing is running");
 });
 
-test("stop keeps the conversation; delete removes it here and on the Host", async () => {
+test("stop keeps the conversation; native archive hides it after Host success", async () => {
   const { asks, host } = fakeHost();
-  const { store } = load(host);
-  const leave = store.subscribe(() => {});
-  await tick(10);
+  const { store, calls } = load(host);
   await store.send("q");
-  await store.stop("ask-1");
-  await tick(20);
+  await Promise.all([store.stop("ask-1"), store.stop("ask-1")]);
   assert.equal(store.get()[0].status, "cancelled", "still listed after stopping");
   assert.ok(asks.has("ask-1"), "still on the Host");
 
   await store.remove("ask-1");
   assert.equal(store.get().length, 0);
   assert.equal(store.active(), undefined, "the open one is closed with it");
-  assert.equal(asks.size, 0);
-  leave();
+  assert.equal(asks.get("ask-1").archived, true);
+  assert.deepEqual(calls.filter(call => call.body.action).map(call => call.body.action), ["stop", "archive"]);
+  await store.reload();
+  assert.equal(store.get().length, 0, "an archived conversation stays off the list");
+});
+
+test("a legacy chat can be read or deleted without submitting a continuation", async () => {
+  const legacy = { id: "old", title: "Past question", status: "idle", readOnly: true, messages: [user("Past question")] };
+  const { asks, host } = fakeHost([legacy]);
+  const { store, calls } = load(host);
+  await store.reload();
+  store.pick("old");
+  assert.equal(store.active().messages[0].content[0].text, "Past question");
+  assert.equal(await store.send("follow-up"), false);
+  assert.ok(calls.every(call => call.method === "GET"));
+  await store.remove("old");
+  assert.deepEqual(calls.at(-1).body, { action: "delete", id: "old" });
+  assert.equal(asks.has("old"), false);
+});
+
+test("overlapping submissions send only once and do not switch away from a newly selected chat", async () => {
+  const { host } = fakeHost();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const { store, calls } = load(async (u, method, body) => {
+    if (body.question) await gate;
+    return host(u, method, body);
+  });
+  const first = store.send("q");
+  assert.equal(await store.send("q"), false);
+  store.newChat();
+  release();
+  assert.equal(await first, true);
+  assert.equal(store.active(), undefined);
+  assert.equal(calls.filter(call => call.body.question).length, 1);
+  await store.stop("ask-1");
 });
 
 test("a question the Host refuses is shown as failed, stays open, and keeps the typed text", async () => {

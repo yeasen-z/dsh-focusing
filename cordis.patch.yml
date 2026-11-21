@@ -1,4 +1,4 @@
-# dsh-focusing: one plugin row. Everything tunable lives in its `config`.
+# dsh-focusing: workbench plus an isolated, read-only history advisor preset.
 #
 # The plugin is passive until a turn actually repeats itself. All three
 # intervention strengths are opt-in per profile through this block:
@@ -33,3 +33,15 @@
           enabled: true
           checkEverySteps: 12
         windowSteps: 14
+    - id: focusing-history-advisor-preset
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: focusing-history-advisor
+        name: 历史顾问
+        description: 由 Focusing 按需创建，只读取已绑定的历史快照。
+        order: 100
+        plugins:
+          - id: history-native-executor
+            name: '@deepseek-ai/dsh-tool-executor-native'
+          - id: history-read-only-policy
+            name: 'dsh-focusing/history-advisor-policy'

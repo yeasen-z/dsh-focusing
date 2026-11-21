@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runAsk, readTurn, MAX_STEPS } from "../lib/ask.mjs";
+import { ASK_RESULT_LIMIT, runAsk, readTurn, MAX_STEPS } from "../lib/ask.mjs";
 
 const route = { provider: "p", model: "m" };
 const settings = { temperature: null, maxTokens: 2048 };
@@ -29,6 +29,91 @@ test("a plain answer needs no tools and is returned with its model", async () =>
   assert.equal(out.answer, "你上周主要在做检索。");
   assert.equal(out.model, "p/m");
   assert.deepEqual(out.steps.map(s => s.kind), ["answer"]);
+});
+
+test("historical answers retry a text-only reply and use the results before publishing", async () => {
+  const { llm, requests } = scripted([
+    textTurn("Unsupported first answer"),
+    [...textTurn("Unsupported preamble").slice(0, 1), ...toolTurn(call("search", "focus_list_sessions", { query: "login" }))],
+    textTurn("The log mentions a login fix."),
+  ]);
+  const messages = say("What did I do about login?");
+  const tools = [tool("focus_list_sessions", async () => JSON.stringify({ items: [{ matches: [{ text: "login fix", eventIndex: 12 }] }], total: 1 }))];
+  const result = await runAsk({ llm, route, tools, messages, settings, requireEvidence: true });
+  assert.equal(result.answer, "The log mentions a login fix.");
+  assert.equal(result.partial, false);
+  assert.match(requests[1].system, /make a tool call now/);
+  assert.deepEqual(messages.map(message => message.role), ["user", "assistant", "tool", "assistant"]);
+  assert.ok(!JSON.stringify(messages).includes("Unsupported"));
+});
+
+test("an earlier answer does not let a guarded follow-up repeat unsupported claims", async () => {
+  const { llm, requests } = scripted([textTurn("Unsupported"), textTurn("Still unsupported")]);
+  const messages = [...say("What did I do?"), { role: "assistant", content: [{ type: "text", text: "Earlier answer" }] }, ...say("Which project?")];
+  const result = await runAsk({ llm, route, tools: [], messages, settings, requireEvidence: true });
+  assert.equal(result.reason, "no-evidence");
+  assert.deepEqual(result.steps, []);
+  assert.equal(requests.length, 2);
+  assert.equal(messages.length, 3);
+});
+
+test("a simple greeting can get fixed Ask help after the evidence retry", async () => {
+  const { llm, requests } = scripted([textTurn("Hello!"), textTurn("ASK_HELP")]);
+  const messages = say("Hello!");
+  const result = await runAsk({ llm, route, tools: [], messages, settings, requireEvidence: true });
+  assert.equal(result.dialogue, true);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(messages, say("Hello!"));
+});
+
+test("zero lexical matches alone do not establish facts about work", async () => {
+  const { llm } = scripted([
+    toolTurn(call("search", "focus_list_sessions", { query: "login" })),
+    textTurn("No login work occurred."),
+    textTurn("Nobody worked on login."),
+  ]);
+  const tools = [tool("focus_list_sessions", async () => '{"items":[],"total":0}')];
+  const result = await runAsk({ llm, route, tools, messages: say("q"), settings, requireEvidence: true });
+  assert.equal(result.reason, "no-evidence");
+  assert.deepEqual(result.coverageReasons, ["no-matches"]);
+  assert.equal(result.steps.length, 1);
+});
+
+test("structured tool errors leave a recoverable result and mark covered answers partial", async () => {
+  const { llm, requests } = scripted([
+    toolTurn(call("large", "focus_list_sessions", {}), call("invalid", "focus_read_session", {}), call("activity", "focus_activity", {})),
+    textTurn("Two turns were recorded."),
+  ]);
+  const tools = [
+    tool("focus_list_sessions", async () => JSON.stringify({ items: ["x".repeat(ASK_RESULT_LIMIT)], total: 1 })),
+    tool("focus_read_session", async () => '{"items":['),
+    tool("focus_activity", async () => '{"days":[],"total":2,"warningCount":4,"nextCursor":"activity-details"}'),
+  ];
+  const result = await runAsk({ llm, route, tools, messages: say("q"), settings, requireEvidence: true });
+  assert.equal(result.partial, true);
+  assert.deepEqual(result.coverageReasons, ["tool-error", "source-warning"]);
+  const results = requests[1].messages.slice(2);
+  assert.deepEqual(results.map(message => !!message.isError), [true, true, false]);
+  assert.match(results[0].content[0].text, /Retry with a smaller page/);
+  assert.match(results[1].content[0].text, /valid result page/);
+  assert.equal(JSON.parse(results[2].content[0].text).total, 2);
+});
+
+test("coverage tracks unvisited list pages without requiring irrelevant session events", async () => {
+  const tools = [
+    tool("focus_list_sessions", async ({ cursor }) => JSON.stringify({ items: [{}], total: 2, nextCursor: cursor ? null : "second-page" })),
+    tool("focus_read_session", async () => '{"items":[{"eventIndex":11}],"total":50,"nextCursor":"remaining-events"}'),
+  ];
+  const list = toolTurn(call("list", "focus_list_sessions", {}), call("read", "focus_read_session", { sessionId: "s" }));
+  for (const follow of [false, true]) {
+    const turns = [list];
+    if (follow) turns.push(toolTurn(call("follow", "focus_list_sessions", { cursor: "second-page" })));
+    turns.push(textTurn("I checked the activity in one session."));
+    const { llm } = scripted(turns);
+    const result = await runAsk({ llm, route, tools, messages: say("q"), settings, requireEvidence: true });
+    assert.equal(result.partial, !follow);
+    assert.deepEqual(result.coverageReasons, follow ? [] : ["list-pagination"]);
+  }
 });
 
 test("a tool request is executed, its result is fed back, and the next turn answers", async () => {
@@ -115,6 +200,16 @@ test("a model that exhausts the tool budget must summarize collected evidence", 
   assert.match(out.answer, /覆盖可能不完整/);
   assert.equal(out.steps.filter(s => s.kind === "call").length, MAX_STEPS);
   assert.deepEqual(requests.at(-1).tools, [], "the final synthesis cannot request another tool");
+});
+
+test("exhausting the tool budget without evidence skips synthesis", async () => {
+  const turns = Array.from({ length: MAX_STEPS }, (_, index) => toolTurn(call(`read-${index}`, "focus_read_session", {})));
+  const { llm, requests } = scripted(turns);
+  const tools = [tool("focus_read_session", async () => { throw new Error("Unavailable"); })];
+  const result = await runAsk({ llm, route, tools, messages: say("q"), settings, requireEvidence: true });
+  assert.equal(result.reason, "no-evidence");
+  assert.deepEqual(result.coverageReasons, ["tool-error", "tool-budget"]);
+  assert.equal(requests.length, MAX_STEPS);
 });
 
 test("provider failures, empty answers and a missing model are reported, not thrown", async () => {
