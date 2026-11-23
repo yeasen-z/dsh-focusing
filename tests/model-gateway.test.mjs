@@ -60,6 +60,21 @@ test("the Host model port may become available after gateway creation", async ()
   assert.equal((await gateway.complete({ system: "s", user: "u" })).ok, true);
 });
 
+test("a Host stream that never settles is cut off by the completion deadline", async () => {
+  const settings = normalizeSettings({ provider: "p", model: "m", timeoutMs: 5000 });
+  const gateway = createModelGateway({
+    settingsStore: { get: () => settings },
+    llm: { stream: () => (async function* () { await new Promise(() => {}); })() },
+    resolveRoute: route,
+  });
+  const started = Date.now();
+  const result = await gateway.complete({ system: "s", user: "u" });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "timeout");
+  assert.match(result.detail, /5000 ms/);
+  assert.ok(Date.now() - started < 10000);
+});
+
 test("the external driver needs only settings and fetch, with no Host model service", async () => {
   const calls = [];
   const settings = normalizeSettings({

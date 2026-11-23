@@ -96,7 +96,7 @@ function setup({ legacy = [], owned = [], onPrompt, onArchive, onRead } = {}) {
   };
   const post = body => request("", { method: "POST", body: JSON.stringify(body) });
   const get = id => request(id ? `?id=${encodeURIComponent(id)}` : "");
-  return { get, post, prompts, cancellations, archiveCalls, prepared, events, states, append, answer, route, archived, metadata, store, mount };
+  return { request, get, post, prompts, cancellations, archiveCalls, prepared, events, states, append, answer, route, archived, metadata, store, mount };
 }
 
 function barrier() {
@@ -110,6 +110,28 @@ test("registers a buffered GET and POST route", () => {
   assert.equal(route.path, ROUTE_NATIVE_ASK);
   assert.deepEqual(route.methods, ["GET", "POST"]);
   assert.equal(route.requestBody, "buffered");
+});
+
+test("native reports use the same durable session and tools while remaining separate from Ask history", async () => {
+  const h = setup();
+  const question = "FIXED REPORT PROMPT\nUse the history tools.";
+  const created = await h.post({ question, range: "this-week", offset: 480, locale: "zh", report: { request: "写一份周报", kind: "weekly", templateId: "builtin:weekly" } });
+  assert.equal(created.ok, true);
+  assert.equal(created.ask.kind, "historical-report");
+  assert.equal(created.ask.title, "写一份周报");
+  assert.equal(created.ask.report.kind, "weekly");
+  assert.equal(created.ask.report.range.key, "this-week");
+  assert.equal(created.ask.report.range.label, "本周");
+  assert.equal(h.prompts[0].content[0].text, question);
+  assert.equal((await h.get()).asks.length, 0);
+  const reports = await h.request("?kind=reports");
+  assert.equal(reports.asks.length, 1);
+  const followed = await h.post({ id: created.ask.id, question: "补充验证情况" });
+  assert.equal(followed.ask.sessionId, created.ask.sessionId);
+  assert.equal(h.prompts.length, 2);
+  assert.equal(h.prepared.length, 2);
+  const stored = JSON.parse(readFileSync(h.metadata, "utf8")).sessions[0];
+  assert.equal(stored.report.request, "写一份周报");
 });
 
 test("native questions and follow-ups keep a single session and persist only fixed ownership metadata", async () => {

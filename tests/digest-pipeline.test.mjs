@@ -20,7 +20,7 @@ test('small input makes one call after frozen checkpoint and validates source ci
     assert.equal(checkpoints[0].pipeline.nodes[0].status, 'pending');
     assert.ok(prompt.system.includes('untrusted historical data'));
     assert.ok(prompt.system.length + prompt.user.length <= DIGEST_PROMPT_LIMIT);
-    assert.equal(prompt.maxTokens, 2048);
+    assert.equal(prompt.maxTokens, 8192);
     return success(prompt);
   } });
   assert.equal(calls, 1);
@@ -29,6 +29,110 @@ test('small input makes one call after frozen checkpoint and validates source ci
   assert.equal(digest.pipeline.status, 'done');
   assert.deepEqual(digest.result.projects[0].items[0].sessions, ['real-id']);
   assert.deepEqual(digest.pipeline.coverage, { totalSessions: 1, completedSessions: 1, totalBatches: 1, completedBatches: 1, failedBatches: 0 });
+});
+
+test('weekly digests start with the newest evidence and checkpoint model-requested earlier pages', async () => {
+  const digest = { ...fresh(), kind: 'weekly', range: { ...range, key: 'this-week' } };
+  const first = source('first');
+  first.requests = [{ time: 1, text: `EARLIER_GOAL ${'a'.repeat(1000)}` }];
+  first.replies = [{ time: 2, text: `${'b'.repeat(1500)} LATEST_OUTCOME` }];
+  const second = source('second', 2400);
+  second.replies = [{ time: 2, text: `${'c'.repeat(1000)} UNREQUESTED_OUTCOME` }];
+  const prompts = [];
+  await runDigestPipeline({ digest, slices: [first, second], complete: async prompt => {
+    prompts.push(prompt.user);
+    const answer = success(prompt);
+    if (prompt.user.includes('SOURCE s1 PAGE 1')) {
+      assert.match(prompt.user, /LATEST_OUTCOME/);
+      assert.doesNotMatch(prompt.user, /UNREQUESTED_OUTCOME/);
+      assert.doesNotMatch(prompt.user, /EARLIER_GOAL/);
+      answer.text = JSON.stringify({ ...JSON.parse(answer.text), readEarlier: ['s1', 's1', 'foreign'] });
+      return answer;
+    }
+    if (prompt.user.includes('SOURCE s1 PAGE 2')) {
+      assert.doesNotMatch(prompt.user, /SOURCE s2/);
+      assert.match(prompt.user, /EARLIER_GOAL/);
+      return { ok: false, reason: 'timeout' };
+    }
+    assert.match(prompt.user, /SOURCE s2 PAGE 1/);
+    assert.match(prompt.user, /UNREQUESTED_OUTCOME/);
+    return answer;
+  } });
+  assert.equal(digest.retryable, true);
+  assert.equal(digest.pipeline.coverage.completedSessions, 1);
+  const restored = structuredClone(digest);
+  const retried = [];
+  await runDigestPipeline({ digest: restored, complete: async prompt => {
+    retried.push(prompt.user);
+    return success(prompt);
+  } });
+  assert.equal(restored.partial, false);
+  assert.equal(restored.pipeline.coverage.completedSessions, 2);
+  assert.equal(retried.length, 2);
+  assert.equal(retried[0], prompts.find(prompt => prompt.includes('SOURCE s1 PAGE 2')));
+  assert.match(retried[1], /Merge every supplied summary/);
+});
+
+test('earlier reading stays within the per-session limit and uses frozen sources after interruption', async () => {
+  const digest = { ...fresh(), kind: 'weekly', range: { ...range, key: 'this-week' } };
+  const slices = [source('long-session', 22000)];
+  const pageCalls = [];
+  const complete = async prompt => {
+    const page = prompt.user.match(/SOURCE s1 PAGE (\d+) (MORE|LIMIT|END)/);
+    if (page) pageCalls.push([Number(page[1]), page[2]]);
+    const answer = success(prompt);
+    return { ...answer, text: JSON.stringify({ ...JSON.parse(answer.text), readEarlier: ['s1'] }) };
+  };
+  const controller = new AbortController();
+  await runDigestPipeline({ digest, slices, complete, signal: controller.signal, save: async value => {
+    if (value.pipeline.nodes.some(node => node.round === 0 && node.status === 'done')) controller.abort();
+  } });
+  assert.deepEqual(pageCalls, [[1, 'MORE']]);
+  assert.equal(digest.pipeline.coverage.completedSessions, 0);
+  const restored = structuredClone(digest);
+  await runDigestPipeline({ digest: restored, slices, complete });
+  assert.deepEqual(pageCalls, [[1, 'MORE'], [2, 'MORE'], [3, 'LIMIT']]);
+  assert.equal(restored.pipeline.coverage.completedSessions, 1);
+  assert.equal(restored.pipeline.leaves.length, 3);
+  assert.equal(restored.pipeline.status, 'done');
+});
+
+test('weekly digest batches fit the prompt limit and continue after failed model calls', async () => {
+  const digest = { ...fresh(), kind: 'weekly', range: { ...range, key: 'this-week' } };
+  const slices = Array.from({ length: 43 }, (_, index) => source(`id-${index}`, 15000));
+  let active = 0, maxActive = 0, calls = 0;
+  await runDigestPipeline({ digest, slices, complete: async prompt => {
+    assert.ok(prompt.system.length + prompt.user.length <= DIGEST_PROMPT_LIMIT);
+    assert.equal([...prompt.user.matchAll(/SOURCE s\d+ PAGE/g)].length, 1);
+    calls++;
+    maxActive = Math.max(maxActive, ++active);
+    await new Promise(resolve => setImmediate(resolve));
+    active--;
+    return { ok: false, reason: 'timeout' };
+  } });
+  assert.equal(maxActive, 3);
+  assert.equal(calls, slices.length);
+  assert.equal(digest.pipeline.leaves.length, slices.length);
+  assert.equal(digest.pipeline.coverage.failedBatches, calls);
+});
+
+test('weekly reduction compacts page JSON before merging it', async () => {
+  const digest = { ...fresh(), kind: 'weekly', range: { ...range, key: 'this-week' } };
+  const longSummary = 'long-summary-'.repeat(120);
+  let reduction;
+  await runDigestPipeline({ digest, slices: [source('a'), source('b')], complete: async prompt => {
+    if (prompt.user.includes('Merge every supplied summary.')) {
+      reduction = prompt.user;
+      return success(prompt);
+    }
+    const answer = success(prompt);
+    return { ...answer, text: JSON.stringify({ ...JSON.parse(answer.text), summary: longSummary }) };
+  } });
+  assert.ok(reduction);
+  assert.match(reduction, /compact session cards/);
+  assert.ok(!reduction.includes(longSummary));
+  assert.match(reduction, /long-summary/);
+  assert.equal(digest.partial, false);
 });
 
 test('oversized single session is split losslessly including long titles and all excerpts', () => {

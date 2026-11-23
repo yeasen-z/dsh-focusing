@@ -39,6 +39,18 @@ test('GET paints four labelled quadrants; completed tasks are collapsed and rest
  assert.equal(app.calls.at(-1).body.task.status,'todo');assert.equal(app.calls.at(-1).body.revision,1);app.dispose();
 });
 
+test('task status sits beside the title and metadata does not leave an empty row',async()=>{
+  const app=mount(()=>response([task({status:'doing',project:'',dueDate:''})]));app.render();await tick();
+  const tree=app.render();
+  const top=find(tree,n=>n.props.className==='fw-todo-item-top')[0];
+  assert.ok(top.children.some(n=>n.props?.className==='fw-todo-status-chip doing'));
+  const actions=top.children.find(n=>n.props?.className==='fw-todo-item-actions');
+  assert.ok(actions,'actions share the title row');
+  assert.ok(top.children.indexOf(actions)<top.children.findIndex(n=>n.props?.className==='fw-todo-status-chip doing'),'actions appear before the status');
+  assert.equal(find(tree,n=>n.props.className==='fw-todo-meta').length,0);
+  assert.match(text(top),/Doing/);app.dispose();
+});
+
 test('round completion control announces the move and completed count; restore announces success',async()=>{
  const app=mount(c=>c.body?.task?.status==='done'?response([task({status:'done',completedAt:2})]):response([task()]));app.render();await tick();
  const complete=button(app.render(),'Done');assert.equal(complete.props['aria-label'],'Done · Ship');await complete.props.onClick();await tick();

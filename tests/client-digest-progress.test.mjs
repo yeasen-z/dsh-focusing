@@ -42,8 +42,8 @@ test('resume submission deduplicates clicks and shows errors without losing prio
 });
 test('older failed digests without resume support still create a new request',async()=>{
  const savedNavigator=Object.getOwnPropertyDescriptor(globalThis,'navigator');Object.defineProperty(globalThis,'navigator',{value:{language:'zh'},configurable:true});
- const h=harness({...base,status:'failed',retryable:false},{post:()=>({ok:true,digest:{...base,id:'new-id'}})});
- try{await find(h.render(),n=>n.type==='button'&&text(n)==='重试')[0].props.onClick();const body=JSON.parse(h.requests[0].options.body);assert.equal(body.action,undefined);assert.equal(body.request,'整理本周');assert.equal(body.range,'this-week');assert.equal(h.state()[2],'new-id');}
+ const h=harness({...base,status:'failed',retryable:false},{post:()=>({ok:true,ask:{id:'focus-new-id',title:'整理本周',status:'running',report:{request:'整理本周',kind:'weekly',range:base.range},messages:[]}})});
+ try{await find(h.render(),n=>n.type==='button'&&text(n)==='重试')[0].props.onClick();const body=JSON.parse(h.requests[0].options.body);assert.equal(body.action,undefined);assert.equal(body.report.request,'整理本周');assert.equal(body.range,'this-week');assert.match(h.requests[0].url,/native-ask$/);assert.equal(h.state()[2],'focus-new-id');}
  finally{if(savedNavigator)Object.defineProperty(globalThis,'navigator',savedNavigator);else delete globalThis.navigator;}
 });
 test('missing progress fields do not claim zero coverage and legacy stages still render',()=>{

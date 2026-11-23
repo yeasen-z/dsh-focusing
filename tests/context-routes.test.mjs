@@ -237,7 +237,7 @@ test("Codex records participate in listing, detail, digest and follow-up", async
   const start = await h.post("/api/dsh-focusing.digest", {request:"today", offset:480});
   const digest = await waitDone(h, start.digest.id);
   assert.equal(digest.stats.sessions, 2);
-  assert.match(h.prompts[0], /Codex repair complete/);
+  assert.ok(h.prompts.some(prompt => /Codex repair complete/.test(prompt)));
   const follow = await h.post("/api/dsh-focusing.followup", {id:digest.id, question:"what changed?"});
   assert.equal(follow.ok, true);
   assert.match(h.prompts.at(-1), /Codex repair complete/);
@@ -274,7 +274,7 @@ test("Claude records participate in listing, detail and digest through the same 
   const started = await h.post("/api/dsh-focusing.digest", { request: "today", offset: 480 });
   const digest = await waitDone(h, started.digest.id);
   assert.equal(digest.stats.sessions, 2);
-  assert.match(h.prompts[0], /Claude repair complete/);
+  assert.ok(h.prompts.some(prompt => /Claude repair complete/.test(prompt)));
   const taggedStart = await h.post("/api/dsh-focusing.digest", { request: "today", offset: 480, tags: ["source:claude", "workspace:/w/claude"] });
   const taggedDigest = await waitDone(h, taggedStart.digest.id);
   assert.equal(taggedDigest.stats.sessions, 1, "a report only reads sessions matching every tag");

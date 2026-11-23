@@ -82,7 +82,9 @@ test("home prioritizes activity and recent content without repeating feature car
   const tree = render(HOME());
   const all = text(tree);
   assert.match(all, new RegExp(dict.wb_heroTitle));
-  assert.match(all, /3 个会话/);
+  const stats = find(tree, n => n.props?.className === "fw-stats fw-home-stats")[0];
+  assert.equal(text(find(stats, n => n.type === "strong")[0]), "3", "the week's session count is a stat tile");
+  assert.equal(find(tree, n => n.props?.className === "fw-page-head").length, 1, "the page opens with the shared header");
   assert.equal(find(tree, n => n.props?.className === "fw-caps" || n.props?.className === "fw-cap").length, 0);
   assert.equal(find(tree, n => n.type === "textarea").length, 0, "nothing is typed on the home page");
   assert.ok(all.includes("上周做了什么"), "the latest chats are listed");
@@ -289,6 +291,21 @@ test("a new chat shows suggestions that send themselves; a running turn offers S
   assert.equal(find(running, n => n.type === "textarea")[0].props.placeholder, dict.askFollowPh, "an open chat asks for a follow-up");
 });
 
+test("a native report renders the live DSH conversation and Stop instead of pipeline stages", () => {
+  const { render, dict } = load();
+  const native = {
+    ...digest, id: "focus-r1", native: true, nativeStatus: "running", status: "running",
+    request: "整理本周", title: "本周报告", range: { key: "this-week", label: "本周" },
+    messages: [user("整理本周"), { role: "assistant", content: [{ type: "tool-call", id: "c1", name: "focus_list_sessions", arguments: "{}" }] }],
+  };
+  const tree = render([0, "result", native.id, native, "", [], "", "", null]);
+  assert.ok(find(tree, n => n.type === "button" && text(n) === dict.askStop).length);
+  assert.ok(!text(tree).includes(dict.wb_stageReduce));
+  const chat = find(tree, n => n.props?.conv?.id === native.id)[0];
+  assert.equal(chat.props.conv.status, "running");
+  assert.equal(chat.props.conv.messages[1].content[0].name, "focus_list_sessions");
+});
+
 test("a finished digest renders summary, projects, days, next steps and follow-ups", () => {
   const { render } = load();
   const tree = render([0, "result", "d1", digest, "", [], "", "", null]);
@@ -329,11 +346,14 @@ test("a running digest shows its stages", () => {
 test("records and digests views render lists", () => {
   const { render } = load();
   const rec = { id: "s1", title: "修复登录", cwd: "/w/app", project: "app", gist: "g", turns: 2, calls: 5, todosDone: 1, todosTotal: 2, lastAt: Date.now() };
-  const states = [0, "records", null, null, "", [], "", "", null, "", false, "", "this-week", "", "", ["/w/app"], { ok: true, records: [rec], stats: { sessions: 1, turns: 2, calls: 5 }, range: { label: "本周", from: "a", to: "b" }, projects: ["app"], workspaces: ["/w/app"] }, ""];
+  const handoff = { id: "h1", title: "登录改造交接", kind: "handoff", range: { label: "会话" }, createdAt: Date.now() };
+  const states = [0, "records", null, null, "", [handoff], "", "", null, "", false, "", "this-week", "", "", ["/w/app"], { ok: true, records: [rec], stats: { sessions: 1, turns: 2, calls: 5 }, range: { label: "本周", from: "a", to: "b" }, projects: ["app"], workspaces: ["/w/app"] }, ""];
   const renderedRecords = render(states);
   assert.ok(text(renderedRecords).includes("修复登录"));
-  const all = text(render([0, "digests", null, null, "", [{ id: "d1", title: "本周工作整理", kind: "weekly", range: { label: "本周" }, createdAt: Date.now() }], "", "", null]));
+  assert.ok(text(renderedRecords).includes("登录改造交接"), "handoffs reopen from their owning records area");
+  const all = text(render([0, "digests", null, null, "", [handoff, { id: "d1", title: "本周工作整理", kind: "weekly", range: { label: "本周" }, createdAt: Date.now() }], "", "", null]));
   assert.ok(all.includes("本周工作整理"));
+  assert.ok(!all.includes("登录改造交接"), "report history excludes handoffs");
 });
 
 test("records are a source switch over workspace bars, and a bar unfolds its sessions", () => {
@@ -532,6 +552,9 @@ test("the page restores a native draggable title strip", () => {
   assert.match(SOURCE, /\.fw-drag-strip\{[^}]*-webkit-app-region:drag/, "the upper empty strip can drag and double-click the native window");
   assert.match(SOURCE, /className:'fw-drag-strip'/, "the strip is rendered by the workbench");
   assert.match(SOURCE, /\.fw-menu\{[^}]*-webkit-app-region:no-drag/, "the menu remains clickable over that strip");
+  assert.match(SOURCE, /\.focusing-recent-bar\{[^}]*-webkit-app-region:drag/, "blank space beside session tabs moves the window");
+  assert.match(SOURCE, /\.focusing-recent-tab,\.focusing-recent-tab button\{-webkit-app-region:no-drag\}/, "the tabs themselves stay clickable");
+  assert.match(SOURCE, /headerPart\('tabs'\)\} :is\(button,a,input,select,\[role=tab\],\[role=button\],\[tabindex\]\)\{-webkit-app-region:no-drag\}/, "native header controls stay clickable inside the draggable row");
   assert.match(SOURCE, /\.fw button,\.fw input,\.fw textarea,\.fw select,\.fw a\{[^}]*z-index:9;[^}]*-webkit-app-region:no-drag/, "every interactive control stays above and outside the drag region");
 });
 
@@ -719,15 +742,15 @@ test("the Digests page offers templates instead of a text box, and can add its o
   const tree = render(DIGESTS);
   assert.equal(find(tree, n => n.type === "textarea").length, 0, "no free-text box: asking is the Ask page's job");
   const rows = find(tree, n => n.props?.className === "fw-tpl");
-  assert.equal(rows.length, 4);
+  assert.equal(rows.length, 3);
   assert.ok(text(rows[0]).includes("周报") && text(rows[0]).includes("整理我这周干了什么"));
-  assert.ok(text(rows[3]).includes("发布复盘"), "your own template is listed with the shipped ones");
+  assert.ok(text(rows[2]).includes("发布复盘"), "your own template is listed with the shipped ones");
   const labels = rows.map(r => find(r, n => n.type === "button").map(n => text(n)));
   assert.ok(labels[0].includes(dict.wb_generate) && !labels[0].includes(dict.wb_tplEdit), "a shipped template runs but cannot be edited");
   assert.ok(text(rows[0]).includes(dict.wb_tplBuiltin));
-  assert.ok(labels[2].includes(dict.wb_tplGoRecords), "the handoff template points at the records page");
-  assert.ok(!labels[2].includes(dict.wb_generate), "and cannot be run from here");
-  assert.ok(labels[3].includes(dict.wb_generate) && labels[3].includes(dict.wb_tplEdit), "your own can be run and edited");
+  assert.ok(!text(tree).includes(dict.wb_tplGoRecords), "session handoffs live only on the records page");
+  assert.ok(!labels[1].includes(dict.wb_tplEdit), "shipped templates cannot be edited");
+  assert.ok(labels[2].includes(dict.wb_generate) && labels[2].includes(dict.wb_tplEdit), "your own can be run and edited");
 });
 
 test("generating from a template asks for that template, not a typed request", () => {
@@ -735,15 +758,16 @@ test("generating from a template asks for that template, not a typed request", (
   const { render } = env;
   env.seedTemplates(TEMPLATES);
   const posts = [];
-  globalThis.fetch = async (url, init) => { if (init?.method === "POST") posts.push({ url, body: JSON.parse(init.body) }); return { ok: true, json: async () => ({ ok: true, digest: { id: "d9", status: "running", request: "x" } }) }; };
+  globalThis.fetch = async (url, init) => { if (init?.method === "POST") posts.push({ url, body: JSON.parse(init.body) }); return { ok: true, json: async () => ({ ok: true, ask: { id: "focus-d9", title: "整理我这周干了什么", status: "running", report: { request: "整理我这周干了什么", kind: "weekly", range: { key: "this-week", label: "本周" } }, messages: [] } }) }; };
   const tree = render(DIGESTS);
   const weekly = find(tree, n => n.props?.className === "fw-tpl")[0];
   find(weekly, n => n.type === "button" && text(n).includes(env.dict.wb_generate))[0].props.onClick();
   const post = posts.at(-1);
-  assert.match(post.url, /dsh-focusing\.digest$/);
-  assert.equal(post.body.templateId, "builtin:weekly");
-  assert.equal(post.body.request, undefined, "the words live in the template");
-  assert.equal(post.body.rangeLocked, undefined, "the template's own range applies unless the person overrides it");
+  assert.match(post.url, /dsh-focusing\.native-ask$/);
+  assert.equal(post.body.report.templateId, "builtin:weekly");
+  assert.equal(post.body.report.request, TEMPLATES[0].instruction);
+  assert.match(post.body.question, /Focusing 历史工具/);
+  assert.equal(post.body.range, "this-week");
 });
 
 test("a new template form saves a name, an instruction and a range", () => {
@@ -777,7 +801,7 @@ test("your own template can be edited and deleted; the shipped ones offer neithe
   const posts = [];
   globalThis.fetch = async (url, init) => { if (init?.method === "POST") posts.push(JSON.parse(init.body)); return { ok: true, json: async () => ({ ok: true, templates: TEMPLATES }) }; };
   const rows = find(render(DIGESTS), n => n.props?.className === "fw-tpl");
-  const own = rows[3];
+  const own = rows[2];
   find(own, n => n.type === "button" && text(n) === dict.wb_tplEdit)[0].props.onClick();
   const form = env.rerender();
   assert.equal(find(form, n => n.type === "input")[0].props.value, "发布复盘", "editing starts from what is saved");
@@ -785,7 +809,7 @@ test("your own template can be edited and deleted; the shipped ones offer neithe
   assert.equal(posts.at(-1).action, "update");
   assert.equal(posts.at(-1).id, "tpl-1");
 
-  const again = find(env.rerender(), n => n.props?.className === "fw-tpl")[3];
+  const again = find(env.rerender(), n => n.props?.className === "fw-tpl")[2];
   find(again, n => n.type === "button" && n.props?.["aria-label"] === dict.wb_delete)[0].props.onClick();
   assert.deepEqual(posts.at(-1), { action: "delete", id: "tpl-1" });
   assert.equal(find(rows[0], n => n.type === "button" && n.props?.["aria-label"] === dict.wb_delete).length, 0, "a shipped template has no delete");
