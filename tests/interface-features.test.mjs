@@ -101,8 +101,16 @@ test('topbar positioning does not depend on native conversation view tabs',()=>{
   const props={...entry.options.inject(),useSessions:f=>f({phase:'ready',byId:{}})};
   const tree=env.render(entry.component,props);
   const css=nodes(tree,n=>n.type==='style')[0].children.join('');
-  assert.match(css,/header:has\(\[data-conversation-header-leading\] \.focusing-recent-bar\)\{padding-top:5px\}/);
+  assert.match(css,/header:has\(\[data-conversation-header-leading\] \.focusing-recent-seat\)\{padding-top:5px\}/);
+  assert.equal(tree.props.className,'focusing-recent-seat','the header keeps a seat for the row');
+  assert.equal(nodes(tree,n=>n.props.className==='focusing-recent-bar').length,1,'without a portal the bar stays inline');
   env.dispose();
+});
+test('the tab bar floats over the frame so the session right panel does not narrow it',()=>{
+  assert.match(source,/\.focusing-recent-bar\[data-floating\]\{position:absolute;right:0;/,'the floating bar runs to the window edge');
+  assert.match(source,/html\[data-focusing-tabs-floating\] \[data-rightbar-col\] \[data-sidebar-right-panel='push'\]\{top:var\(--focusing-tabs-bottom,0px\)\}/,'the docked right panel starts below the bar');
+  assert.match(source,/querySelector\?\.\(':scope > \[data-shell-overlay\]'\)/,'the bar is placed in the frame overlay layer');
+  assert.match(source,/root\.removeAttribute\('data-focusing-tabs-floating'\)/,'unmounting restores the right panel');
 });
 test('closing the active tab selects its neighbour; closing the last returns to Focusing',()=>{
   const env=harness();env.storage.set('dsh-focusing.open-session-tabs.v2',JSON.stringify(['a','b']));
